@@ -1,98 +1,137 @@
-// --- Ebook Agent Elements & Logic ---
+// --- Ebook Agent Elements & Logic (Using API Polling) ---
 const ebookProgressBar = document.getElementById('ebook-progressBar');
-const ebookProgressText = document.getElementById('ebook-progress-text');
+const ebookProgressText = document.getElementById('ebook-progress-text'); // Still used for final status
 const ebookStatusMessage = document.getElementById('ebook-status-message');
 const ebookGenerateButton = document.getElementById('ebook-generateButton');
 const ebookDownloadLinkContainer = document.getElementById('ebook-download-link-container');
 
-// Connect to the Ebook agent's Socket.IO server (assuming it runs on the same origin)
-const ebookSocket = io(window.location.origin); // Assumes ebook server runs on same origin
 let ebookGenerationInProgress = false;
+let ebookPollingInterval = null;
+const EBOOK_API_BASE_URL = window.location.origin; // Ebook API runs on same origin as frontend
 
 ebookGenerateButton.addEventListener('click', () => {
     if (!ebookGenerationInProgress) {
-        console.log('Requesting ebook generation...');
-        ebookSocket.emit('start_generation', {});
+        console.log('Requesting ebook generation via API...');
         ebookGenerationInProgress = true;
         ebookGenerateButton.disabled = true;
-        ebookStatusMessage.textContent = 'Generation started...';
+        ebookStatusMessage.textContent = 'Sending generation request...';
         ebookProgressBar.classList.remove('error');
-        ebookProgressBar.style.backgroundColor = '#4CAF50'; // Reset color
-        ebookProgressBar.style.width = '0%';
-        ebookProgressBar.textContent = '0%';
+        ebookProgressBar.style.backgroundColor = '#4CAF50';
+        ebookProgressBar.style.width = '0%'; // Reset progress bar visually
+        ebookProgressBar.textContent = 'Starting...';
         ebookProgressText.textContent = 'Initializing...';
         ebookDownloadLinkContainer.innerHTML = '';
+
+        // Call the /generate endpoint
+        fetch(`${EBOOK_API_BASE_URL}/generate`, { method: 'POST' })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || `HTTP error ${response.status}`) });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Ebook generation started:', data.message);
+                ebookStatusMessage.textContent = 'Generation in progress...';
+                ebookProgressText.textContent = 'Running... (Status polling)'; // Indicate polling
+                // Start polling the status endpoint
+                startEbookStatusPolling();
+            })
+            .catch(error => {
+                console.error('Error starting ebook generation:', error);
+                ebookStatusMessage.textContent = `Error starting: ${error.message}`;
+                ebookGenerationInProgress = false;
+                ebookGenerateButton.disabled = false;
+                ebookProgressBar.classList.add('error');
+                ebookProgressBar.style.width = '100%';
+                ebookProgressBar.textContent = 'Error';
+            });
     }
 });
 
-ebookSocket.on('connect', () => {
-    console.log('Connected to Ebook server');
-    ebookStatusMessage.textContent = 'Connected. Ready to generate Ebook.';
-    ebookGenerateButton.disabled = ebookGenerationInProgress;
-});
-
-ebookSocket.on('disconnect', () => {
-    console.log('Disconnected from Ebook server');
-    ebookStatusMessage.textContent = 'Disconnected from Ebook server. Please refresh.';
-    ebookGenerateButton.disabled = true;
-});
-
-ebookSocket.on('connect_error', (err) => {
-    console.error('Ebook Connection Error:', err);
-    ebookStatusMessage.textContent = `Ebook Server Connection Error. Is it running?`;
-    ebookGenerateButton.disabled = true;
-});
-
-ebookSocket.on('status_update', (data) => {
-    console.log('Ebook Status Update:', data.message);
-    ebookStatusMessage.textContent = data.message;
-});
-
-ebookSocket.on('progress_update', (data) => {
-    const completed = data.completed;
-    const total = data.total;
-    console.log(`Ebook Progress: ${completed}/${total}`);
-    if (total > 0) {
-        const percentage = Math.round((completed / total) * 100);
-        ebookProgressBar.style.width = `${percentage}%`;
-        ebookProgressBar.textContent = `${percentage}%`;
-        ebookProgressText.textContent = `Chapter ${completed} of ${total} complete.`;
-    } else {
-        ebookProgressBar.style.width = '0%';
-        ebookProgressBar.textContent = '0%';
-        ebookProgressText.textContent = 'Waiting for outline...';
+function startEbookStatusPolling() {
+    // Clear any existing interval
+    if (ebookPollingInterval) {
+        clearInterval(ebookPollingInterval);
     }
-});
 
-ebookSocket.on('generation_complete', (data) => {
+    ebookPollingInterval = setInterval(() => {
+        fetch(`${EBOOK_API_BASE_URL}/status`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Ebook Status Poll:', data);
+                ebookStatusMessage.textContent = data.message || 'Polling status...'; // Update status message
+
+                // Update UI based on status
+                if (data.status === 'running') {
+                    // Keep polling, maybe update progress text if backend provided more detail
+                    ebookProgressText.textContent = 'Running... (Status polling)';
+                    ebookProgressBar.style.width = '50%'; // Indicate running visually (no percentage)
+                    ebookProgressBar.textContent = 'Running';
+                } else if (data.status === 'completed') {
+                    handleEbookCompletion(data);
+                    clearInterval(ebookPollingInterval); // Stop polling
+                } else if (data.status === 'error') {
+                    handleEbookError(data.error || data.message || 'Unknown error');
+                    clearInterval(ebookPollingInterval); // Stop polling
+                } else if (data.status === 'idle') {
+                     // Should not happen if we started generation, but handle defensively
+                     console.warn("Polling found idle status unexpectedly.");
+                     ebookStatusMessage.textContent = "Process finished unexpectedly (idle).";
+                     ebookGenerationInProgress = false;
+                     ebookGenerateButton.disabled = false;
+                     clearInterval(ebookPollingInterval);
+                }
+            })
+            .catch(error => {
+                console.error('Error polling ebook status:', error);
+                ebookStatusMessage.textContent = `Error polling status: ${error.message}`;
+                // Consider stopping polling after too many errors
+                // clearInterval(ebookPollingInterval);
+                // ebookGenerationInProgress = false;
+                // ebookGenerateButton.disabled = false;
+            });
+    }, 3000); // Poll every 3 seconds
+}
+
+function handleEbookCompletion(data) {
     console.log('Ebook Generation Complete:', data.message);
     ebookStatusMessage.textContent = 'Ebook Generation Complete!';
     ebookProgressText.textContent = 'Finished.';
+    ebookProgressBar.style.width = '100%';
+    ebookProgressBar.textContent = 'Done';
     ebookGenerationInProgress = false;
     ebookGenerateButton.disabled = false;
+
+    ebookDownloadLinkContainer.innerHTML = ''; // Clear previous
     if (data.pdf_filename) {
         const downloadLink = document.createElement('a');
-        downloadLink.href = `/download/${encodeURIComponent(data.pdf_filename)}`;
+        downloadLink.href = `${EBOOK_API_BASE_URL}/download/${encodeURIComponent(data.pdf_filename)}`;
         downloadLink.textContent = `Download ${data.pdf_filename}`;
-        ebookDownloadLinkContainer.innerHTML = '';
         ebookDownloadLinkContainer.appendChild(downloadLink);
     } else {
          ebookDownloadLinkContainer.textContent = 'PDF filename not provided.';
     }
-});
+}
 
-ebookSocket.on('generation_error', (data) => {
-    console.error('Ebook Generation Error:', data.message);
-    ebookStatusMessage.textContent = `Error: ${data.message}`;
+function handleEbookError(errorMessage) {
+    console.error('Ebook Generation Error:', errorMessage);
+    ebookStatusMessage.textContent = `Error: ${errorMessage}`;
     ebookProgressText.textContent = 'Failed.';
     ebookProgressBar.classList.add('error');
     ebookProgressBar.style.width = '100%';
     ebookProgressBar.textContent = 'Error';
     ebookGenerationInProgress = false;
     ebookGenerateButton.disabled = false;
-});
+}
 
-// --- Podcast Agent Elements & Logic ---
+
+// --- Podcast Agent Elements & Logic (Using API/SSE - Unchanged) ---
 const podcastProgressBar = document.getElementById('podcast-progressBar');
 const podcastProgressText = document.getElementById('podcast-progress-text');
 const podcastStatusMessage = document.getElementById('podcast-status-message');
@@ -242,5 +281,5 @@ function handlePodcastError(errorMessage) {
 }
 
 // --- Initial State ---
-ebookGenerateButton.disabled = true; // Disabled until connected to ebook server
+// Ebook button is enabled by default now, disabled on click
 // Podcast button is enabled by default, disabled on click
