@@ -40,18 +40,7 @@ def configure_gemini():
     print(f"Using API Key ending with: ...{api_key[-4:]}")
     return genai.GenerativeModel(GEMINI_MODEL)
 
-# Modified update_progress to use the passed status update function
-def update_progress(status_update_func, completed_episodes, total_episodes):
-    """Updates the progress via the provided status update function."""
-    try:
-        progress_data = {
-            'completed': completed_episodes,
-            'total': total_episodes
-        }
-        status_update_func('progress', progress_data) # Use type 'progress'
-        print(f"Progress Status Sent: {completed_episodes}/{total_episodes}")
-    except Exception as e:
-        print(f"Error sending progress status update: {e}")
+# Removed update_progress function
 
 def safe_filename(text):
     """Creates a safe filename from text."""
@@ -59,12 +48,12 @@ def safe_filename(text):
     text = text.replace(' ', '_')
     return text[:100] # Limit length
 
-# --- Core Agent Functions (Modified for status_update_func) ---
+# --- Core Agent Functions (Modified to remove status_update_func) ---
 
-def find_and_assess_topic(status_update_func, model):
+def find_and_assess_topic(model):
     """Identifies a trending tech topic and assesses its viability."""
     print("Finding and assessing trending tech topic...")
-    status_update_func('status', {'message': f"Searching for trending tech topics ({TREND_SOURCE_HINT})..."})
+    # status_update_func('status', {'message': f"Searching for trending tech topics ({TREND_SOURCE_HINT})..."}) # Removed
     prompt = (
         f"Identify 3-5 current trending topics in technology, particularly those gaining traction on platforms like YouTube or major tech news sites ({TREND_SOURCE_HINT}). "
         f"For each topic, briefly explain why it's trending.\n"
@@ -100,24 +89,24 @@ def find_and_assess_topic(status_update_func, model):
         else:
             selected_topic = selected_topic_match.group(1).strip()
 
-        status_update_func('status', {'message': f"Topic selected: '{selected_topic}'. Assessing viability..."})
+        # status_update_func('status', {'message': f"Topic selected: '{selected_topic}'. Assessing viability..."}) # Removed
 
         if "Viability Assessment" not in assessment_text or len(re.findall(r"-\s*\[", assessment_text)) < 2:
              print(f"Warning: Viability assessment for '{selected_topic}' seems limited. Proceeding cautiously.")
-             status_update_func('status', {'message': f"Warning: Viability assessment for '{selected_topic}' seems limited."})
-        else:
-             status_update_func('status', {'message': f"Topic '{selected_topic}' assessed as viable."})
+             # status_update_func('status', {'message': f"Warning: Viability assessment for '{selected_topic}' seems limited."}) # Removed
+        # else:
+             # status_update_func('status', {'message': f"Topic '{selected_topic}' assessed as viable."}) # Removed
 
         return selected_topic
     except Exception as e:
         print(f"Error finding/assessing topic: {e}")
-        status_update_func('error', {'message': f"Error finding/assessing topic: {e}"})
-        raise # Re-raise the exception to be caught by the wrapper
+        # status_update_func('error', {'message': f"Error finding/assessing topic: {e}"}) # Removed
+        raise
 
-def generate_podcast_outline(status_update_func, model, topic, num_episodes):
+def generate_podcast_outline(model, topic, num_episodes):
     """Generates the podcast series outline."""
     print(f"Generating {num_episodes}-episode outline for topic: {topic}...")
-    status_update_func('status', {'message': f"Generating {num_episodes}-episode outline for '{topic}'..."})
+    # status_update_func('status', {'message': f"Generating {num_episodes}-episode outline for '{topic}'..."}) # Removed
     prompt = (
         f"Create a detailed outline for a {num_episodes}-episode podcast series about '{topic}'. "
         f"The series should start with foundational concepts and progressively build towards more advanced aspects or specific applications. "
@@ -136,17 +125,17 @@ def generate_podcast_outline(status_update_func, model, topic, num_episodes):
         with open(OUTLINE_FILE, 'w', encoding='utf-8') as f:
             f.write(outline_text)
         print(f"Podcast outline saved to {OUTLINE_FILE}")
-        status_update_func('status', {'message': f"Podcast outline saved to {OUTLINE_FILE}"})
+        # status_update_func('status', {'message': f"Podcast outline saved to {OUTLINE_FILE}"}) # Removed
         return outline_text
     except Exception as e:
         print(f"Error generating podcast outline: {e}")
-        status_update_func('error', {'message': f"Error generating podcast outline: {e}"})
+        # status_update_func('error', {'message': f"Error generating podcast outline: {e}"}) # Removed
         raise
 
-def parse_podcast_outline(status_update_func, outline_text):
+def parse_podcast_outline(outline_text):
     """Parses the generated podcast outline text."""
     print("Parsing podcast outline...")
-    status_update_func('status', {'message': 'Parsing generated outline...'})
+    # status_update_func('status', {'message': 'Parsing generated outline...'}) # Removed
     episodes = []
     try:
         episode_sections = re.split(r'\nEpisode \d+:', '\n' + outline_text, flags=re.IGNORECASE)
@@ -179,20 +168,20 @@ def parse_podcast_outline(status_update_func, outline_text):
              raise ValueError("Outline parsing failed to extract any episode details.")
 
         print(f"Successfully parsed {len(episodes)} episodes.")
-        status_update_func('status', {'message': f"Parsed {len(episodes)} episodes from outline."})
+        # status_update_func('status', {'message': f"Parsed {len(episodes)} episodes from outline."}) # Removed
         return episodes
     except Exception as e:
         print(f"Error parsing podcast outline: {e}")
-        status_update_func('error', {'message': f"Error parsing podcast outline: {e}. Check {OUTLINE_FILE}."})
+        # status_update_func('error', {'message': f"Error parsing podcast outline: {e}. Check {OUTLINE_FILE}."}) # Removed
         raise
 
-def generate_episode_pdf(status_update_func, model, episode_details, series_topic, total_episodes):
+def generate_episode_pdf(model, episode_details, series_topic, total_episodes):
     """Generates content for a single episode and saves it as a PDF."""
     episode_num = episode_details['number']
     episode_title = episode_details['title']
     key_points = episode_details['key_points']
     print(f"Generating Episode {episode_num}/{total_episodes}: {episode_title}...")
-    status_update_func('status', {'message': f"Generating Episode {episode_num}/{total_episodes}: {episode_title}..."})
+    # status_update_func('status', {'message': f"Generating Episode {episode_num}/{total_episodes}: {episode_title}..."}) # Removed
 
     prompt = (
         f"You are writing the script content for Episode {episode_num} of a podcast series about '{series_topic}'.\n"
@@ -237,26 +226,26 @@ def generate_episode_pdf(status_update_func, model, episode_details, series_topi
 
     except Exception as e:
         print(f"Error generating Episode {episode_num} ('{episode_title}'): {e}")
-        status_update_func('error', {'message': f"Error generating content or PDF for Episode {episode_num}: {e}"})
+        # status_update_func('error', {'message': f"Error generating content or PDF for Episode {episode_num}: {e}"}) # Removed
         raise # Re-raise to be caught by the main loop/wrapper
 
-# --- Main Pipeline Function (Refactored for API/SSE) ---
+# --- Main Pipeline Function (Refactored for API polling) ---
 
-def run_podcast_pipeline(status_update_func):
-    """The main pipeline logic, callable from Flask, using SSE for status."""
+def run_podcast_pipeline():
+    """The main pipeline logic, callable from Flask, returns result dict."""
     global current_api_key_index
     current_api_key_index = 0 # Reset key index
 
     all_pdf_filenames = [] # Store just filenames for the result
 
-    # Wrap the entire process in a try...except block to report final status
+    # Wrap the entire process in a try...except block to return final status
     try:
         print("Starting Autonomous Podcast Pipeline...")
-        status_update_func('status', {'message': 'Podcast Agent started...'})
+        # status_update_func('status', {'message': 'Podcast Agent started...'}) # Removed
 
         # 0. Auto-Clean & Initial Setup
         print("--- Step 0: Cleaning Up Previous Run ---")
-        status_update_func('status', {'message': 'Cleaning up previous run...'})
+        # status_update_func('status', {'message': 'Cleaning up previous run...'}) # Removed
         if os.path.exists(OUTLINE_FILE):
             try: os.remove(OUTLINE_FILE); print(f"Removed old outline: {OUTLINE_FILE}")
             except Exception as e: print(f"Warning: Could not remove {OUTLINE_FILE}: {e}")
@@ -264,42 +253,42 @@ def run_podcast_pipeline(status_update_func):
             try: shutil.rmtree(PODCAST_DIR); print(f"Removed old podcast dir: {PODCAST_DIR}")
             except Exception as e: print(f"Warning: Could not remove {PODCAST_DIR}: {e}")
         os.makedirs(PODCAST_DIR, exist_ok=True)
-        update_progress(status_update_func, 0, 0) # Initial progress
+        # update_progress(status_update_func, 0, 0) # Removed
 
         # 1. Find & Assess Topic
         print("--- Step 1: Finding Topic ---")
         model = configure_gemini()
-        series_topic = find_and_assess_topic(status_update_func, model)
+        series_topic = find_and_assess_topic(model) # Removed status_update_func
         if not series_topic: raise ValueError("Failed to determine podcast topic.")
 
         # 2. Generate Outline
         print("\n--- Step 2: Generating Outline ---")
         num_episodes = random.randint(NUM_EPISODES_MIN, NUM_EPISODES_MAX)
         model = configure_gemini()
-        outline_text = generate_podcast_outline(status_update_func, model, series_topic, num_episodes)
+        outline_text = generate_podcast_outline(model, series_topic, num_episodes) # Removed status_update_func
         if not outline_text: raise ValueError("Failed to generate podcast outline.")
 
         # 3. Parse Outline
         print("\n--- Step 3: Parsing Outline ---")
-        episodes_data = parse_podcast_outline(status_update_func, outline_text)
+        episodes_data = parse_podcast_outline(outline_text) # Removed status_update_func
         if not episodes_data: raise ValueError("Failed to parse podcast outline.")
         actual_total_episodes = len(episodes_data)
-        update_progress(status_update_func, 0, actual_total_episodes) # Update total
+        # update_progress(status_update_func, 0, actual_total_episodes) # Removed
 
         # 4. Generate Episodes & PDFs
         print("\n--- Step 4: Generating Episodes ---")
-        status_update_func('status', {'message': f"Starting generation of {actual_total_episodes} podcast episodes..."})
+        # status_update_func('status', {'message': f"Starting generation of {actual_total_episodes} podcast episodes..."}) # Removed
         completed_episodes = 0
         for i, episode_info in enumerate(episodes_data):
+            print(f"--- Generating Episode {i+1}/{actual_total_episodes} ---") # Console progress
             model = configure_gemini()
-            pdf_path = generate_episode_pdf(status_update_func, model, episode_info, series_topic, actual_total_episodes)
+            pdf_path = generate_episode_pdf(model, episode_info, series_topic, actual_total_episodes) # Removed status_update_func
             if pdf_path:
                 all_pdf_filenames.append(os.path.basename(pdf_path))
                 completed_episodes += 1
-                update_progress(status_update_func, completed_episodes, actual_total_episodes)
+                # update_progress(status_update_func, completed_episodes, actual_total_episodes) # Removed
                 # time.sleep(1) # Optional delay
             else:
-                # Error should have been raised by generate_episode_pdf
                  raise ValueError(f"Failed to generate PDF for episode {episode_info.get('number', i+1)}.")
 
         # 5. Completion
@@ -307,17 +296,13 @@ def run_podcast_pipeline(status_update_func):
         if completed_episodes == actual_total_episodes:
             print("\nPodcast series generation complete!")
             final_message = f"Successfully generated {actual_total_episodes} podcast episode PDFs for '{series_topic}'."
-            status_update_func('status', {'message': final_message})
-            # Return success status and filenames
+            # status_update_func('status', {'message': final_message}) # Removed
             return {"status": "success", "message": final_message, "pdf_filenames": all_pdf_filenames}
         else:
-            # This path indicates an issue if an error wasn't raised earlier
             raise RuntimeError(f"Inconsistency: Completed {completed_episodes}/{actual_total_episodes} episodes.")
 
     except Exception as e:
-        # Catch any exception from the steps above
         print(f"Podcast pipeline failed: {e}")
         error_message = f"Podcast pipeline failed: {e}"
-        status_update_func('error', {'message': error_message})
-        # Return error status
-        return {"status": "error", "message": error_message, "pdf_filenames": all_pdf_filenames} # Include any PDFs generated before failure
+        # status_update_func('error', {'message': error_message}) # Removed
+        return {"status": "error", "message": error_message, "pdf_filenames": all_pdf_filenames}

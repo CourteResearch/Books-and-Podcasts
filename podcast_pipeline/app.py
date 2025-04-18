@@ -2,122 +2,105 @@ import os
 import time
 import json
 import threading
-from queue import Queue
+# Removed Queue
 from flask import Flask, Response, jsonify, send_from_directory, request
-from flask_cors import CORS # Import CORS
+# Removed CORS import
 # Import the main logic function
 from podcast_agent import run_podcast_pipeline
 import config
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-# Configure CORS to allow requests from your frontend domain
-CORS(app, resources={r"/*": {"origins": "https://books-and-podcasts.onrender.com"}})
-# Simple in-memory queue to hold status messages for SSE clients
-status_queue = Queue()
-# Store results (e.g., list of generated PDF filenames)
-results = {}
-# Lock for managing access to results and generation status
+# Removed SSE Queue
+# Removed CORS setup
+
+# --- Global State for Polling ---
+generation_status = {
+    "status": "idle", # idle, running, completed, error
+    "message": "Ready to generate podcast series.",
+    "pdf_filenames": [],
+    "error": None
+}
 generation_lock = threading.Lock()
-is_generating = False
 
-# --- Helper for SSE ---
-def stream_status():
-    """Generator function for Server-Sent Events."""
-    while True:
-        # Wait for a message in the queue
-        message_data = status_queue.get()
-        if message_data is None: # Use None as a signal to stop
-            break
-        # Format as SSE message: data: json_string\n\n
-        yield f"data: {json.dumps(message_data)}\n\n"
-        status_queue.task_done() # Mark message as processed
-
-def add_status_update(message_type, data):
-    """Adds a status update to the queue for SSE."""
-    status_queue.put({"type": message_type, "data": data})
+# Removed SSE Helper functions (stream_status, add_status_update)
 
 # --- API Routes ---
 @app.route('/generate', methods=['POST'])
-def start_generation_api():
+def start_podcast_generation_api():
     """API endpoint to trigger the podcast generation."""
-    global is_generating, results
+    global generation_status
     with generation_lock:
-        if is_generating:
+        if generation_status["status"] == "running":
             return jsonify({"error": "Generation already in progress."}), 409 # Conflict
 
-        is_generating = True
-        results = {} # Clear previous results
-        # Clear the queue in case of previous aborted runs
-        while not status_queue.empty():
-            try: status_queue.get_nowait()
-            except Queue.Empty: break
-            status_queue.task_done()
+        # Reset status
+        generation_status = {
+            "status": "running",
+            "message": "Generation request received. Starting process...",
+            "pdf_filenames": [],
+            "error": None
+        }
+        print('Received start podcast generation request via API')
 
-        print('Received start generation request via API')
-        add_status_update('status', {'message': 'Generation request received. Starting process...'})
-
-        # Run the pipeline in a background thread, passing the status update function
+        # Run the pipeline in a background thread
         thread = threading.Thread(target=run_podcast_pipeline_wrapper)
         thread.start()
 
-        return jsonify({"message": "Podcast generation started. Monitor /stream for updates."}), 202 # Accepted
+        return jsonify({"message": "Podcast generation started. Poll /status for updates."}), 202 # Accepted
 
-@app.route('/stream')
-def stream():
-    """Endpoint for Server-Sent Events stream."""
-    # Ensure correct MIME type for SSE
-    return Response(stream_status(), mimetype='text/event-stream')
+# Removed /stream endpoint
 
 @app.route('/download/<path:filename>')
-def download_file_api(filename):
-    """API endpoint to download a generated PDF."""
-    # Security: Basic check
+def download_podcast_pdf_api(filename):
+    """API endpoint to download a generated podcast PDF."""
     if '..' in filename or filename.startswith('/'):
         return jsonify({"error": "Invalid filename"}), 400
     podcast_directory = os.path.join('.', config.PODCAST_DIR)
-    print(f"Attempting to serve PDF via API: {filename} from directory: {podcast_directory}")
+    print(f"Attempting to serve Podcast PDF via API: {filename} from directory: {podcast_directory}")
     try:
         return send_from_directory(directory=podcast_directory, path=filename, as_attachment=True)
     except FileNotFoundError:
-        print(f"Error: File not found - {filename} in {podcast_directory}")
+        print(f"Error: Podcast PDF not found - {filename} in {podcast_directory}")
         return jsonify({"error": "File not found"}), 404
 
 @app.route('/status')
-def get_status():
-    """API endpoint to check current generation status and results."""
+def get_podcast_status_api():
+    """API endpoint for the frontend to poll generation status."""
     with generation_lock:
-        status_data = {
-            "is_generating": is_generating,
-            "results": results # Contains filenames upon completion or error message
-        }
-        return jsonify(status_data)
+        return jsonify(generation_status.copy())
 
 # --- Wrapper for Background Task ---
 def run_podcast_pipeline_wrapper():
-    """Wrapper to run the pipeline and handle status updates/completion."""
-    global is_generating, results
+    """Wrapper to run the pipeline and update the global status."""
+    global generation_status
     try:
-        # Pass our status update function to the pipeline
-        pipeline_results = run_podcast_pipeline(add_status_update)
+        # Run the refactored pipeline function (no longer takes status_update_func)
+        result = run_podcast_pipeline()
+
+        # Update status based on result
         with generation_lock:
-            results = pipeline_results if pipeline_results else {"error": "Pipeline finished with no results."}
+            generation_status["status"] = result.get("status", "error") # completed or error
+            generation_status["message"] = result.get("message", "An unknown error occurred.")
+            generation_status["pdf_filenames"] = result.get("pdf_filenames", [])
+            if result.get("status") == "error":
+                 generation_status["error"] = result.get("message")
+
     except Exception as e:
-        print(f"Error during pipeline execution in wrapper: {e}")
+        # Catch unexpected errors from the pipeline itself
+        print(f"Critical error during podcast pipeline execution in wrapper: {e}")
         with generation_lock:
-            results = {"error": f"Pipeline failed: {e}"}
-        add_status_update('error', {'message': f"Pipeline failed: {e}"})
+            generation_status["status"] = "error"
+            generation_status["message"] = f"Critical pipeline error: {e}"
+            generation_status["error"] = str(e)
+            generation_status["pdf_filenames"] = [] # Ensure empty list on critical error
     finally:
-        with generation_lock:
-            is_generating = False
-        add_status_update('finished', results) # Signal completion/error details
-        status_queue.put(None) # Signal SSE generator to stop
-        print("Background generation task finished.")
+        print(f"Podcast background task finished with status: {generation_status['status']}")
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    print("Starting Podcast Agent Flask API server...")
+    print("Starting Podcast Agent Flask API server (polling)...")
     os.makedirs(config.PODCAST_DIR, exist_ok=True)
     # Use Gunicorn in production via Procfile
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5001)), debug=False) # Debug=False for production/Gunicorn
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5001)), debug=False) # Use different port, Debug=False

@@ -5,4 +5,4 @@ Flask
 python-dotenv
 gunicorn
 requests
-Flask-CORS # Add CORS support
+# Flask-CORS removed
