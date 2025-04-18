@@ -3,35 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Book Generation Progress</title>
+    <title>Autonomous Content Generator</title>
     <style>
         body {
             font-family: sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
             background-color: #f4f4f4;
             margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
         }
-        .progress-container {
-            width: 80%;
-            max-width: 600px;
+        .main-container {
+            display: flex;
+            gap: 30px; /* Space between the two sections */
+            width: 100%;
+            max-width: 1400px; /* Adjust max width as needed */
+        }
+        .generator-section {
+            flex: 1; /* Each section takes equal space */
             background-color: #ddd;
             border-radius: 5px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             padding: 20px;
             text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         .progress-bar-container {
-            width: 100%;
+            width: 90%; /* Relative to section */
             background-color: #eee;
             border-radius: 3px;
             margin-top: 15px;
-            overflow: hidden; /* Ensures inner bar respects border radius */
+            overflow: hidden;
         }
         .progress-bar {
-            width: 0%; /* Initial width */
+            width: 0%;
             height: 30px;
             background-color: #4CAF50; /* Green */
             text-align: center;
@@ -40,19 +47,30 @@
             border-radius: 3px;
             transition: width 0.5s ease-in-out;
         }
-        #progress-text {
+        .progress-bar.error {
+             background-color: #dc3545; /* Red for error */
+        }
+        .progress-text { /* Renamed from #progress-text */
             margin-top: 10px;
             font-weight: bold;
             color: #333;
+            min-height: 1.2em;
         }
         h1 {
             color: #555;
             margin-bottom: 20px;
+            font-size: 1.8em;
         }
-        #status-message {
+         h2 {
+            color: #444;
+            margin-bottom: 15px;
+            font-size: 1.4em;
+        }
+        .status-message { /* Renamed from #status-message */
             margin-top: 15px;
             color: #666;
-            min-height: 1.2em; /* Prevent layout shift */
+            min-height: 1.2em;
+            font-style: italic;
         }
         button {
             padding: 10px 20px;
@@ -72,34 +90,58 @@
             background-color: #ccc;
             cursor: not-allowed;
         }
-        #download-link-container {
+        .download-link-container { /* Renamed from #download-link-container */
             margin-top: 15px;
             min-height: 1.2em;
         }
-        #download-link-container a {
+        .download-link-container a,
+        .download-link-container ul {
             color: #5c67f2;
             text-decoration: none;
             font-weight: bold;
         }
-        #download-link-container a:hover {
+         .download-link-container ul {
+            list-style: none;
+            padding: 0;
+            margin-top: 5px;
+        }
+         .download-link-container li {
+            margin-bottom: 5px;
+        }
+        .download-link-container a:hover {
             text-decoration: underline;
         }
     </style>
-    <!-- Include Socket.IO client library -->
+    <!-- Include Socket.IO client library (for Ebook agent) -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js" integrity="sha384-c79GN5Vsp+kE/SYz36g+mJ5/n5Pq+A/fEVz7+s09v7z/YyXg/1i8/s8uL0jM6/zX" crossorigin="anonymous"></script>
 </head>
 <body>
-    <div class="progress-container">
-        <h1>Autonomous Book Generator</h1>
-        <div id="status-message">Connecting to server...</div>
-        <div class="progress-bar-container">
-            <div class="progress-bar" id="progressBar">0%</div>
+    <div class="main-container">
+        <!-- Ebook Generator Section -->
+        <div class="generator-section" id="ebook-section">
+            <h2>Ebook Generator</h2>
+            <div class="status-message" id="ebook-status-message">Connecting to Ebook server...</div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="ebook-progressBar">0%</div>
+            </div>
+            <div class="progress-text" id="ebook-progress-text">Waiting to start...</div>
+            <div class="download-link-container" id="ebook-download-link-container"></div>
+            <button id="ebook-generateButton">Create E-Book</button>
         </div>
-        <div id="progress-text">Waiting to start...</div>
-        <div id="download-link-container"></div>
-        <button id="generateButton">Create E-Book</button>
+
+        <!-- Podcast Generator Section -->
+        <div class="generator-section" id="podcast-section">
+            <h2>Podcast Generator</h2>
+            <div class="status-message" id="podcast-status-message">Ready.</div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="podcast-progressBar">0%</div>
+            </div>
+            <div class="progress-text" id="podcast-progress-text">Waiting to start...</div>
+            <div class="download-link-container" id="podcast-download-link-container"></div>
+            <button id="podcast-generateButton">Create Podcast Series</button>
+        </div>
     </div>
 
-    <script src="script.js"></script> <!-- Keep our custom script -->
+    <script src="script.js"></script> <!-- Load the combined script -->
 </body>
 </html>
