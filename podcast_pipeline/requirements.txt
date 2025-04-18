@@ -1,0 +1,7 @@
+google-generativeai
+reportlab
+Flask
+# Flask-SocketIO removed
+python-dotenv
+gunicorn
+requests
