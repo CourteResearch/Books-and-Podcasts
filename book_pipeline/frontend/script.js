@@ -104,7 +104,7 @@ const podcastDownloadLinkContainer = document.getElementById('podcast-download-l
 
 // URL for the Podcast API (running separately, likely on port 5001)
 // IMPORTANT: Adjust this URL if the podcast API runs elsewhere or on a different port
-const PODCAST_API_BASE_URL = 'http://localhost:5001'; // Default local URL
+const PODCAST_API_BASE_URL = 'https://podcasts-api-93x8.onrender.com';
 
 let podcastGenerationInProgress = false;
 let podcastEventSource = null; // To hold the EventSource connection
