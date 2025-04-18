@@ -131,9 +131,9 @@ function handleEbookError(errorMessage) {
 }
 
 
-// --- Podcast Agent Elements & Logic (Using API/SSE - Unchanged) ---
+// --- Podcast Agent Elements & Logic (Using API Polling) ---
 const podcastProgressBar = document.getElementById('podcast-progressBar');
-const podcastProgressText = document.getElementById('podcast-progress-text');
+const podcastProgressText = document.getElementById('podcast-progress-text'); // Still used for final status
 const podcastStatusMessage = document.getElementById('podcast-status-message');
 const podcastGenerateButton = document.getElementById('podcast-generateButton');
 const podcastDownloadLinkContainer = document.getElementById('podcast-download-link-container');
@@ -142,7 +142,7 @@ const podcastDownloadLinkContainer = document.getElementById('podcast-download-l
 const PODCAST_API_BASE_URL = 'https://podcasts-api-93x8.onrender.com';
 
 let podcastGenerationInProgress = false;
-let podcastEventSource = null; // To hold the EventSource connection
+let podcastPollingInterval = null; // To hold the polling interval
 
 podcastGenerateButton.addEventListener('click', () => {
     if (!podcastGenerationInProgress) {
@@ -151,16 +151,13 @@ podcastGenerateButton.addEventListener('click', () => {
         podcastGenerateButton.disabled = true;
         podcastStatusMessage.textContent = 'Sending request to Podcast API...';
         podcastProgressBar.classList.remove('error');
-        podcastProgressBar.style.backgroundColor = '#4CAF50'; // Reset color
+        podcastProgressBar.style.backgroundColor = '#4CAF50';
         podcastProgressBar.style.width = '0%';
-        podcastProgressBar.textContent = '0%';
+        podcastProgressBar.textContent = 'Starting...';
         podcastProgressText.textContent = 'Initializing...';
-        podcastDownloadLinkContainer.innerHTML = ''; // Clear previous links
+        podcastDownloadLinkContainer.innerHTML = '';
 
-        if (podcastEventSource) {
-            podcastEventSource.close();
-        }
-
+        // Call the /generate endpoint
         fetch(`${PODCAST_API_BASE_URL}/generate`, { method: 'POST' })
             .then(response => {
                 if (!response.ok) {
@@ -170,8 +167,10 @@ podcastGenerateButton.addEventListener('click', () => {
             })
             .then(data => {
                 console.log('Podcast generation started:', data.message);
-                podcastStatusMessage.textContent = 'Generation started. Connecting to status stream...';
-                connectToPodcastStream();
+                podcastStatusMessage.textContent = 'Generation in progress...';
+                podcastProgressText.textContent = 'Running... (Status polling)';
+                // Start polling the status endpoint
+                startPodcastStatusPolling();
             })
             .catch(error => {
                 console.error('Error starting podcast generation:', error);
@@ -185,67 +184,65 @@ podcastGenerateButton.addEventListener('click', () => {
     }
 });
 
-function connectToPodcastStream() {
-    console.log(`Connecting to SSE stream: ${PODCAST_API_BASE_URL}/stream`);
-    podcastEventSource = new EventSource(`${PODCAST_API_BASE_URL}/stream`);
-
-    podcastEventSource.onopen = () => {
-        console.log('SSE Connection opened.');
-        podcastStatusMessage.textContent = 'Connected to status stream. Waiting for updates...';
-    };
-
-    podcastEventSource.onerror = (error) => {
-        console.error('SSE Error:', error);
-        podcastStatusMessage.textContent = 'Error connecting to status stream. Retrying?';
-        // Consider closing manually after repeated errors if needed
-    };
-
-    podcastEventSource.onmessage = (event) => {
-        try {
-            const messageData = JSON.parse(event.data);
-            console.log('SSE Message Received:', messageData);
-
-            switch (messageData.type) {
-                case 'status':
-                    podcastStatusMessage.textContent = messageData.data.message;
-                    break;
-                case 'progress':
-                    updatePodcastProgressBar(messageData.data.completed, messageData.data.total);
-                    break;
-                case 'error':
-                    handlePodcastError(messageData.data.message);
-                    podcastEventSource.close();
-                    break;
-                case 'finished':
-                    handlePodcastCompletion(messageData.data);
-                    podcastEventSource.close();
-                    break;
-                default:
-                    console.warn('Unknown SSE message type:', messageData.type);
-            }
-        } catch (e) {
-            console.error('Error parsing SSE message:', e, 'Data:', event.data);
-        }
-    };
-}
-
-function updatePodcastProgressBar(completed, total) {
-    if (total > 0) {
-        const percentage = Math.round((completed / total) * 100);
-        podcastProgressBar.style.width = `${percentage}%`;
-        podcastProgressBar.textContent = `${percentage}%`;
-        podcastProgressText.textContent = `Episode ${completed} of ${total} generated.`;
-    } else {
-        podcastProgressBar.style.width = '0%';
-        podcastProgressBar.textContent = '0%';
-        podcastProgressText.textContent = 'Waiting for outline...';
+function startPodcastStatusPolling() {
+    // Clear any existing interval
+    if (podcastPollingInterval) {
+        clearInterval(podcastPollingInterval);
     }
+
+    podcastPollingInterval = setInterval(() => {
+        fetch(`${PODCAST_API_BASE_URL}/status`)
+            .then(response => {
+                if (!response.ok) {
+                    // Handle potential network errors or server issues during polling
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Podcast Status Poll:', data);
+                podcastStatusMessage.textContent = data.message || 'Polling status...';
+
+                // Update UI based on status
+                if (data.status === 'running') {
+                    podcastProgressText.textContent = 'Running... (Status polling)';
+                    podcastProgressBar.style.width = '50%'; // Indicate running
+                    podcastProgressBar.textContent = 'Running';
+                } else if (data.status === 'completed') {
+                    handlePodcastCompletion(data); // Use the existing completion handler
+                    clearInterval(podcastPollingInterval); // Stop polling
+                } else if (data.status === 'error') {
+                    handlePodcastError(data.error || data.message || 'Unknown error'); // Use existing error handler
+                    clearInterval(podcastPollingInterval); // Stop polling
+                } else if (data.status === 'idle') {
+                     console.warn("Polling found idle status unexpectedly.");
+                     podcastStatusMessage.textContent = "Process finished unexpectedly (idle).";
+                     podcastGenerationInProgress = false;
+                     podcastGenerateButton.disabled = false;
+                     clearInterval(podcastPollingInterval);
+                }
+            })
+            .catch(error => {
+                console.error('Error polling podcast status:', error);
+                podcastStatusMessage.textContent = `Error polling status: ${error.message}`;
+                // Optionally stop polling after repeated errors
+                // clearInterval(podcastPollingInterval);
+                // podcastGenerationInProgress = false;
+                // podcastGenerateButton.disabled = false;
+            });
+    }, 3000); // Poll every 3 seconds
 }
 
-function handlePodcastCompletion(data) {
+// Removed connectToPodcastStream function
+
+// Removed updatePodcastProgressBar function (no real-time progress with polling)
+
+function handlePodcastCompletion(data) { // Re-using this function name
     console.log('Podcast Generation Complete:', data.message);
     podcastStatusMessage.textContent = 'Podcast Series Generation Complete!';
     podcastProgressText.textContent = 'Finished.';
+    podcastProgressBar.style.width = '100%'; // Show 100% on completion
+    podcastProgressBar.textContent = 'Done';
     podcastGenerationInProgress = false;
     podcastGenerateButton.disabled = false;
 
@@ -269,7 +266,7 @@ function handlePodcastCompletion(data) {
     }
 }
 
-function handlePodcastError(errorMessage) {
+function handlePodcastError(errorMessage) { // Re-using this function name
     console.error('Podcast Generation Error:', errorMessage);
     podcastStatusMessage.textContent = `Error: ${errorMessage}`;
     podcastProgressText.textContent = 'Failed.';
@@ -281,5 +278,5 @@ function handlePodcastError(errorMessage) {
 }
 
 // --- Initial State ---
-// Ebook button is enabled by default now, disabled on click
+// Ebook button is enabled by default, disabled on click
 // Podcast button is enabled by default, disabled on click
