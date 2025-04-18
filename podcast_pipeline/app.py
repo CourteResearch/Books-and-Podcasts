@@ -4,12 +4,15 @@ import json
 import threading
 from queue import Queue
 from flask import Flask, Response, jsonify, send_from_directory, request
+from flask_cors import CORS # Import CORS
 # Import the main logic function
 from podcast_agent import run_podcast_pipeline
 import config
 
 # --- Flask App Setup ---
 app = Flask(__name__)
+# Configure CORS to allow requests from your frontend domain
+CORS(app, resources={r"/*": {"origins": "https://books-and-podcasts.onrender.com"}})
 # Simple in-memory queue to hold status messages for SSE clients
 status_queue = Queue()
 # Store results (e.g., list of generated PDF filenames)
