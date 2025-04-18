@@ -1,16 +1,20 @@
 import os
 import threading
-from flask import Flask, render_template, send_from_directory, url_for # Added url_for
+from flask import Flask, render_template, send_from_directory, url_for
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS # Import CORS
 # Import the refactored main logic function
 from main import run_generation_pipeline
 
 # --- Flask App Setup ---
 # Explicitly set static_url_path to match the directory name
 app = Flask(__name__, template_folder='frontend', static_folder='frontend', static_url_path='/frontend')
-# It's good practice to set a secret key for SocketIO, though less critical for local dev
+# It's good practice to set a secret key for SocketIO
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'a_default_secret_key_change_me')
-socketio = SocketIO(app, async_mode='threading') # Use threading for background tasks
+# Initialize CORS for the Flask app (optional, but can be good practice)
+# CORS(app)
+# Initialize SocketIO with CORS settings
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="https://books-and-podcasts.onrender.com") # Allow specific origin
 
 # --- Routes ---
 @app.route('/')
