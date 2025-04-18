@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Generation Progress</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f4f4f4;
+            margin: 0;
+        }
+        .progress-container {
+            width: 80%;
+            max-width: 600px;
+            background-color: #ddd;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            text-align: center;
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #eee;
+            border-radius: 3px;
+            margin-top: 15px;
+            overflow: hidden; /* Ensures inner bar respects border radius */
+        }
+        .progress-bar {
+            width: 0%; /* Initial width */
+            height: 30px;
+            background-color: #4CAF50; /* Green */
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            border-radius: 3px;
+            transition: width 0.5s ease-in-out;
+        }
+        #progress-text {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #333;
+        }
+        h1 {
+            color: #555;
+            margin-bottom: 20px;
+        }
+        #status-message {
+            margin-top: 15px;
+            color: #666;
+            min-height: 1.2em; /* Prevent layout shift */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            background-color: #5c67f2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            margin-top: 20px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #4a54cc;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #download-link-container {
+            margin-top: 15px;
+            min-height: 1.2em;
+        }
+        #download-link-container a {
+            color: #5c67f2;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        #download-link-container a:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <!-- Include Socket.IO client library -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js" integrity="sha384-c79GN5Vsp+kE/SYz36g+mJ5/n5Pq+A/fEVz7+s09v7z/YyXg/1i8/s8uL0jM6/zX" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="progress-container">
+        <h1>Autonomous Book Generator</h1>
+        <div id="status-message">Connecting to server...</div>
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progressBar">0%</div>
+        </div>
+        <div id="progress-text">Waiting to start...</div>
+        <div id="download-link-container"></div>
+        <button id="generateButton">Create E-Book</button>
+    </div>
+
+    <script src="script.js"></script> <!-- Keep our custom script -->
+</body>
+</html>
