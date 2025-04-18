@@ -18,7 +18,7 @@ from config import (
     TOTAL_CHAPTERS as EBOOK_TOTAL_CHAPTERS,
     TARGET_WORD_COUNT_MIN as EBOOK_TARGET_WORD_MIN,
     TARGET_WORD_COUNT_MAX as EBOOK_TARGET_WORD_MAX,
-    # Podcast specific (Add these to config.py later)
+    # Podcast specific
     PODCAST_DIR, PODCAST_OUTLINE_FILE,
     NUM_EPISODES_MIN, NUM_EPISODES_MAX,
     PODCAST_TARGET_WORD_MIN, PODCAST_TARGET_WORD_MAX,
@@ -372,29 +372,83 @@ def podcast_generate_outline(model, topic, num_episodes):
         raise
 
 def podcast_parse_outline(outline_text):
-    """Parses the generated podcast outline text."""
+    """Parses the generated podcast outline text. More robust version."""
     print("Parsing podcast outline...")
     episodes = []
+    episode_sections = []
     try:
-        episode_sections = re.split(r'\nEpisode \d+:', '\n' + outline_text, flags=re.IGNORECASE)
-        if len(episode_sections) > 1: episode_sections = episode_sections[1:]
-        else: raise ValueError("Could not split podcast outline into episodes.")
-        print(f"Found {len(episode_sections)} potential podcast episode sections.")
+        # Attempt 1: Split by the specific "Episode X:" pattern first
+        sections_attempt1 = re.split(r'\nEpisode \d+:', '\n' + outline_text, flags=re.IGNORECASE)
+
+        if len(sections_attempt1) > 1:
+            episode_sections = sections_attempt1[1:] # Skip potential text before the first split
+            print(f"Found {len(episode_sections)} sections using 'Episode X:' split.")
+        else:
+            # Attempt 2: If specific pattern fails, try splitting by lines that likely start an episode
+            print("Warning: 'Episode X:' pattern not found. Trying line-based splitting...")
+            potential_sections = []
+            current_section_lines = []
+            # Split by lines and group them based on lines starting with "Episode <num>:" or "<num>."
+            lines = outline_text.strip().split('\n')
+            for line in lines:
+                line_strip = line.strip()
+                # Check if the line looks like a new episode start marker (Episode <num>: or <num>.)
+                if re.match(r'^\s*(Episode\s+\d+\s*:|\d+\.\s+)', line_strip, flags=re.IGNORECASE):
+                    if current_section_lines: # Add the previously accumulated section if not empty
+                        potential_sections.append("\n".join(current_section_lines))
+                    current_section_lines = [line] # Start the new section with the marker line
+                elif current_section_lines or line_strip: # Only append if we've already started a section OR if it's the very first non-empty line
+                    current_section_lines.append(line)
+            if current_section_lines: # Add the last accumulated section
+                potential_sections.append("\n".join(current_section_lines))
+
+            if potential_sections:
+                 print(f"Line-based splitting found {len(potential_sections)} potential sections.")
+                 episode_sections = potential_sections
+            else:
+                 # If both methods fail, raise the error
+                 raise ValueError("Could not split podcast outline into episodes using known patterns.")
+
+        # --- Process the identified sections ---
         for i, section in enumerate(episode_sections):
              episode_num = i + 1
              section = section.strip()
              if not section: continue
-             title_match = re.match(r'\s*(.*?)\s*(\n|$)', section)
-             title = title_match.group(1).strip().strip('*') if title_match else f"Episode {episode_num}"
+
+             # Extract Title: Assume title is the first line, potentially after marker
+             title = f"Episode {episode_num}" # Default
+             first_line = section.split('\n')[0].strip()
+             # Try removing markers like "Episode X:" or "X." from the start of the first line
+             title_match = re.match(r'^\s*(?:Episode\s+\d+\s*[:-])?\s*(.*?)\s*$', first_line, flags=re.IGNORECASE)
+             if title_match and title_match.group(1):
+                 title = title_match.group(1).strip().strip('*')
+
+             # Extract Key Points (look for bullet points or numbered lists after "Key Points:")
+             points_text = "No key points found."
              points_match = re.search(r'Key Points:(.*)', section, re.IGNORECASE | re.DOTALL)
-             key_points = points_match.group(1).strip() if points_match else "No key points found."
-             episodes.append({"number": episode_num, "title": title, "key_points": key_points, "full_section": section})
-        if not episodes: raise ValueError("Podcast outline parsing failed.")
+             if points_match:
+                 # Extract text after "Key Points:", strip whitespace, handle common list formats
+                 raw_points = points_match.group(1).strip()
+                 # Split by newline and filter for lines starting with common list markers
+                 point_lines = [p.strip() for p in raw_points.split('\n') if p.strip().startswith(('-', '*', str(i+1)+'.'))]
+                 if point_lines:
+                     points_text = "\n".join(point_lines)
+
+             episodes.append({
+                 "number": episode_num,
+                 "title": title,
+                 "key_points": points_text, # Use extracted points or default
+                 "full_section": section
+             })
+
+        if not episodes:
+             raise ValueError("Podcast outline parsing failed to extract any episode details after splitting.")
+
         print(f"Successfully parsed {len(episodes)} podcast episodes.")
         return episodes
     except Exception as e:
         print(f"Error parsing podcast outline: {e}")
-        raise
+        raise # Re-raise the exception
 
 def podcast_generate_episode_pdf(model, episode_details, series_topic, total_episodes):
     """Generates content for a single podcast episode and saves it as a PDF."""
@@ -468,7 +522,7 @@ def run_podcast_pipeline():
         if not outline_text: raise ValueError("Failed to generate podcast outline.")
 
         print("\n--- Step 3: Parsing Podcast Outline ---")
-        episodes_data = podcast_parse_outline(outline_text)
+        episodes_data = podcast_parse_outline(outline_text) # Use the corrected function
         if not episodes_data: raise ValueError("Failed to parse podcast outline.")
         actual_total_episodes = len(episodes_data)
 
