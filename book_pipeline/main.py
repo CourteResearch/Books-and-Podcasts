@@ -10,16 +10,14 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 import requests # Keep for potential future use
 
-# Import config - Adjust based on final config structure
+# Import config - Use the renamed variables
 from config import (
     GEMINI_API_KEYS, GEMINI_MODEL,
     # Ebook specific
-    CHAPTERS_DIR as EBOOK_CHAPTERS_DIR, OUTLINE_FILE as EBOOK_OUTLINE_FILE,
-    TOTAL_CHAPTERS as EBOOK_TOTAL_CHAPTERS,
-    TARGET_WORD_COUNT_MIN as EBOOK_TARGET_WORD_MIN,
-    TARGET_WORD_COUNT_MAX as EBOOK_TARGET_WORD_MAX,
+    EBOOK_CHAPTERS_DIR, EBOOK_OUTLINE_FILE, EBOOK_TOTAL_CHAPTERS,
+    EBOOK_TARGET_WORD_MIN, EBOOK_TARGET_WORD_MAX,
     # Podcast specific
-    PODCAST_DIR, PODCAST_OUTLINE_FILE,
+    PODCAST_DIR, PODCAST_OUTLINE_FILE, # These should already exist with these names in config
     NUM_EPISODES_MIN, NUM_EPISODES_MAX,
     PODCAST_TARGET_WORD_MIN, PODCAST_TARGET_WORD_MAX,
     TREND_SOURCE_HINT
@@ -132,39 +130,55 @@ def ebook_generate_instructional_prompt(model, book_title, book_premise):
         raise
 
 def ebook_parse_outline(outline_text):
-    """Parses the generated ebook outline text into a structured format."""
+    """Parses the generated ebook outline text into a structured format. More robust version."""
     print("Parsing ebook outline...")
     chapters = []
+    chapter_sections = []
     try:
-        chapter_sections = re.split(r'\nChapter \d+:', '\n' + outline_text, flags=re.IGNORECASE)
-        if len(chapter_sections) > 1: chapter_sections = chapter_sections[1:]
-        else: raise ValueError("Could not split ebook outline into chapters.")
+        # Attempt 1: Split by lines starting with "Chapter X:", allowing for markdown bolding
+        sections_attempt1 = re.split(r'^\s*(?:\*{1,2})?Chapter\s+\d+:(?:\*{1,2})?\s*', outline_text, flags=re.MULTILINE | re.IGNORECASE)
 
-        print(f"Found {len(chapter_sections)} potential ebook chapter sections.")
+        if len(sections_attempt1) > 1:
+            chapter_sections = sections_attempt1[1:] # Skip content before the first chapter
+            print(f"Found {len(chapter_sections)} sections using 'Chapter X:' split.")
+        else:
+            # Attempt 2: If specific pattern fails, try splitting by lines starting with numbers (e.g., "1.")
+            print("Warning: 'Chapter X:' pattern not found. Trying numbered list splitting...")
+            sections_attempt2 = re.split(r'^\s*\d+\.\s+', outline_text, flags=re.MULTILINE)
+            if len(sections_attempt2) > 1:
+                chapter_sections = sections_attempt2[1:] # Skip content before the first number
+                print(f"Numbered list splitting found {len(chapter_sections)} potential sections.")
+            else:
+                 # If both methods fail, raise the error
+                 raise ValueError("Could not split ebook outline into chapters using known patterns (Chapter X: or N.).")
+
+        # --- Process the identified sections ---
         for i, section in enumerate(chapter_sections):
              chapter_num = i + 1
              section = section.strip()
              if not section: continue
 
-             title_match_label = re.search(r'Title:(.*?)(Summary:|Emotional Arc:|Key Twist:|Reveal:|$)', section, re.DOTALL | re.IGNORECASE)
-             title_match_direct = re.search(r'^\s*(.*?)\s*(Summary:|Emotional Arc:|Key Twist:|Reveal:|\n)', section, re.IGNORECASE)
-             if title_match_label: title = title_match_label.group(1).strip().strip('*')
-             elif title_match_direct:
-                 potential_title = title_match_direct.group(1).strip().strip('*')
-                 if not re.match(r'(Summary|Emotional Arc|Key Twist|Reveal):', potential_title, re.IGNORECASE) and len(potential_title) < 100: title = potential_title
-                 else: title = f"Chapter {chapter_num}"
-             else: title = f"Chapter {chapter_num}"
+             # Extract Title: Assume title is the first line of the section
+             title = f"Chapter {chapter_num}" # Default
+             first_line = section.split('\n')[0].strip()
+             # Remove potential bold markers from title
+             title_match = re.match(r'^\s*(?:\*{1,2})?(.*?)(?:\*{1,2})?\s*$', first_line)
+             if title_match and title_match.group(1):
+                 title = title_match.group(1).strip()
 
-             summary_match = re.search(r'Summary:(.*?)(Title:|Emotional Arc:|Key Twist:|Reveal:|\n\n|$)', section, re.DOTALL | re.IGNORECASE)
-             arc_match = re.search(r'Emotional Arc:(.*?)(Title:|Summary:|Key Twist:|Reveal:|\n\n|$)', section, re.DOTALL | re.IGNORECASE)
-             twist_match = re.search(r'(?:Key Twist:|Reveal:)(.*?)(Title:|Summary:|Emotional Arc:|\n\n|$)', section, re.DOTALL | re.IGNORECASE)
+             # Extract other details (make regex slightly more flexible)
+             summary_match = re.search(r'Summary\s*:(.*?)(Title:|Emotional Arc:|Key Twist:|Reveal:|\n\n|$)', section, re.DOTALL | re.IGNORECASE)
+             arc_match = re.search(r'Emotional Arc\s*:(.*?)(Title:|Summary:|Key Twist:|Reveal:|\n\n|$)', section, re.DOTALL | re.IGNORECASE)
+             twist_match = re.search(r'(?:Key Twist|Reveal)\s*:(.*?)(Title:|Summary:|Emotional Arc:|\n\n|$)', section, re.DOTALL | re.IGNORECASE) # Allow "Key Twist" or "Reveal"
+
              summary = summary_match.group(1).strip() if summary_match else "Summary not found."
              arc = arc_match.group(1).strip() if arc_match else "Arc not found."
-             twist = twist_match.group(2).strip() if twist_match else "Twist not found."
+             # Use group(1) for twist_match as the label is now non-capturing
+             twist = twist_match.group(1).strip() if twist_match else "Twist not found."
 
              chapters.append({"number": chapter_num, "title": title, "summary": summary, "arc": arc, "twist": twist, "full_section": section})
 
-        if not chapters: raise ValueError("Ebook outline parsing failed.")
+        if not chapters: raise ValueError("Ebook outline parsing failed to extract any chapter details after splitting.")
         print(f"Successfully parsed {len(chapters)} ebook chapters.")
         return chapters
     except Exception as e:
@@ -276,7 +290,7 @@ def run_ebook_generation_pipeline():
         if not outline_text: raise ValueError(f"Failed to generate ebook outline for '{book_title}'.")
 
         print("\n--- Step 4: Parsing Ebook Outline ---")
-        chapters_data = ebook_parse_outline(outline_text)
+        chapters_data = ebook_parse_outline(outline_text) # Use corrected function
         if not chapters_data: raise ValueError("Failed to parse ebook outline.")
         actual_total_chapters = len(chapters_data)
 

@@ -2,8 +2,9 @@ import os
 import threading
 import time
 from flask import Flask, render_template, send_from_directory, jsonify, request
-# Import both pipeline functions
-from main import run_ebook_generation_pipeline, run_podcast_pipeline
+# Import the specific pipeline functions from the agents module
+from agents.ebook_agent import run_ebook_generation_pipeline
+from agents.podcast_agent import run_podcast_pipeline
 import config # Import config to access directory names
 
 # --- Flask App Setup ---

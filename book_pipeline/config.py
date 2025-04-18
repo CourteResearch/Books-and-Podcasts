@@ -21,17 +21,17 @@ if not GEMINI_API_KEYS:
 
 # --- Configuration Constants ---
 
-# Directories and Files (relative to the script's execution location)
-CHAPTERS_DIR = "chapters"
-OUTLINE_FILE = "outline.md"
-PROMPT_FILE = "../planning.md" # Assumes script runs from book_pipeline directory
-PROGRESS_FILE = "progress.txt"
-FRONTEND_DIR = "frontend"
+# --- Ebook Specific Settings ---
+EBOOK_CHAPTERS_DIR = "chapters"
+EBOOK_OUTLINE_FILE = "outline.md"
+# PROMPT_FILE = "../planning.md" # No longer needed for autonomous flow
+# PROGRESS_FILE = "progress.txt" # No longer needed with API polling
+FRONTEND_DIR = "frontend" # Shared frontend directory
 
-# Book Details
-TOTAL_CHAPTERS = 7
-TARGET_WORD_COUNT_MIN = 1500
-TARGET_WORD_COUNT_MAX = 2000
+# Ebook Details
+EBOOK_TOTAL_CHAPTERS = 7 # Used for prompt generation target
+EBOOK_TARGET_WORD_MIN = 1500
+EBOOK_TARGET_WORD_MAX = 2000
 
 # API Settings (adjust as needed)
 # Note: Model name might change depending on API version/availability
