@@ -1,6 +1,6 @@
 // --- Ebook Agent Elements & Logic (Using API Polling) ---
 const ebookProgressBar = document.getElementById('ebook-progressBar');
-const ebookProgressText = document.getElementById('ebook-progress-text'); // Still used for final status
+const ebookProgressText = document.getElementById('ebook-progress-text');
 const ebookStatusMessage = document.getElementById('ebook-status-message');
 const ebookGenerateButton = document.getElementById('ebook-generateButton');
 const ebookDownloadLinkContainer = document.getElementById('ebook-download-link-container');
@@ -17,13 +17,13 @@ ebookGenerateButton.addEventListener('click', () => {
         ebookStatusMessage.textContent = 'Sending generation request...';
         ebookProgressBar.classList.remove('error');
         ebookProgressBar.style.backgroundColor = '#4CAF50';
-        ebookProgressBar.style.width = '0%'; // Reset progress bar visually
+        ebookProgressBar.style.width = '0%';
         ebookProgressBar.textContent = 'Starting...';
         ebookProgressText.textContent = 'Initializing...';
         ebookDownloadLinkContainer.innerHTML = '';
 
-        // Call the /generate endpoint
-        fetch(`${EBOOK_API_BASE_URL}/generate`, { method: 'POST' })
+        // Call the specific /generate-ebook endpoint
+        fetch(`${EBOOK_API_BASE_URL}/generate-ebook`, { method: 'POST' })
             .then(response => {
                 if (!response.ok) {
                     return response.json().then(err => { throw new Error(err.error || `HTTP error ${response.status}`) });
@@ -33,70 +33,55 @@ ebookGenerateButton.addEventListener('click', () => {
             .then(data => {
                 console.log('Ebook generation started:', data.message);
                 ebookStatusMessage.textContent = 'Generation in progress...';
-                ebookProgressText.textContent = 'Running... (Status polling)'; // Indicate polling
-                // Start polling the status endpoint
-                startEbookStatusPolling();
+                ebookProgressText.textContent = 'Running... (Status polling)';
+                startEbookStatusPolling(); // Start polling the specific ebook status endpoint
             })
             .catch(error => {
                 console.error('Error starting ebook generation:', error);
-                ebookStatusMessage.textContent = `Error starting: ${error.message}`;
-                ebookGenerationInProgress = false;
-                ebookGenerateButton.disabled = false;
-                ebookProgressBar.classList.add('error');
-                ebookProgressBar.style.width = '100%';
-                ebookProgressBar.textContent = 'Error';
+                handleEbookError(`Error starting: ${error.message}`); // Use handler
             });
     }
 });
 
 function startEbookStatusPolling() {
-    // Clear any existing interval
-    if (ebookPollingInterval) {
-        clearInterval(ebookPollingInterval);
-    }
+    if (ebookPollingInterval) clearInterval(ebookPollingInterval);
 
     ebookPollingInterval = setInterval(() => {
-        fetch(`${EBOOK_API_BASE_URL}/status`)
+        // Poll the specific /status-ebook endpoint
+        fetch(`${EBOOK_API_BASE_URL}/status-ebook`)
             .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
                 return response.json();
             })
             .then(data => {
                 console.log('Ebook Status Poll:', data);
-                ebookStatusMessage.textContent = data.message || 'Polling status...'; // Update status message
+                ebookStatusMessage.textContent = data.message || 'Polling status...';
 
-                // Update UI based on status
                 if (data.status === 'running') {
-                    // Keep polling, maybe update progress text if backend provided more detail
                     ebookProgressText.textContent = 'Running... (Status polling)';
-                    ebookProgressBar.style.width = '50%'; // Indicate running visually (no percentage)
+                    ebookProgressBar.style.width = '50%';
                     ebookProgressBar.textContent = 'Running';
                 } else if (data.status === 'completed') {
                     handleEbookCompletion(data);
-                    clearInterval(ebookPollingInterval); // Stop polling
+                    clearInterval(ebookPollingInterval);
                 } else if (data.status === 'error') {
                     handleEbookError(data.error || data.message || 'Unknown error');
-                    clearInterval(ebookPollingInterval); // Stop polling
-                } else if (data.status === 'idle') {
-                     // Should not happen if we started generation, but handle defensively
-                     console.warn("Polling found idle status unexpectedly.");
-                     ebookStatusMessage.textContent = "Process finished unexpectedly (idle).";
-                     ebookGenerationInProgress = false;
-                     ebookGenerateButton.disabled = false;
+                    clearInterval(ebookPollingInterval);
+                } else if (data.status === 'idle' && ebookGenerationInProgress) { // Check if we were expecting it to run
+                     console.warn("Polling found idle status unexpectedly for ebook.");
+                     handleEbookError("Process finished unexpectedly (idle).");
+                     clearInterval(ebookPollingInterval);
+                } else if (data.status === 'idle' && !ebookGenerationInProgress) {
+                     // If it's idle and we weren't running, just stop polling
                      clearInterval(ebookPollingInterval);
                 }
             })
             .catch(error => {
                 console.error('Error polling ebook status:', error);
                 ebookStatusMessage.textContent = `Error polling status: ${error.message}`;
-                // Consider stopping polling after too many errors
-                // clearInterval(ebookPollingInterval);
-                // ebookGenerationInProgress = false;
-                // ebookGenerateButton.disabled = false;
+                // Optionally stop polling after too many errors
             });
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
 }
 
 function handleEbookCompletion(data) {
@@ -108,9 +93,10 @@ function handleEbookCompletion(data) {
     ebookGenerationInProgress = false;
     ebookGenerateButton.disabled = false;
 
-    ebookDownloadLinkContainer.innerHTML = ''; // Clear previous
+    ebookDownloadLinkContainer.innerHTML = '';
     if (data.pdf_filename) {
         const downloadLink = document.createElement('a');
+        // Use the shared download endpoint
         downloadLink.href = `${EBOOK_API_BASE_URL}/download/${encodeURIComponent(data.pdf_filename)}`;
         downloadLink.textContent = `Download ${data.pdf_filename}`;
         ebookDownloadLinkContainer.appendChild(downloadLink);
@@ -128,28 +114,29 @@ function handleEbookError(errorMessage) {
     ebookProgressBar.textContent = 'Error';
     ebookGenerationInProgress = false;
     ebookGenerateButton.disabled = false;
+    if (ebookPollingInterval) clearInterval(ebookPollingInterval); // Stop polling on error
 }
 
 
 // --- Podcast Agent Elements & Logic (Using API Polling) ---
 const podcastProgressBar = document.getElementById('podcast-progressBar');
-const podcastProgressText = document.getElementById('podcast-progress-text'); // Still used for final status
+const podcastProgressText = document.getElementById('podcast-progress-text');
 const podcastStatusMessage = document.getElementById('podcast-status-message');
 const podcastGenerateButton = document.getElementById('podcast-generateButton');
 const podcastDownloadLinkContainer = document.getElementById('podcast-download-link-container');
 
-// URL for the Podcast API - Use the deployed Render URL
-const PODCAST_API_BASE_URL = 'https://podcasts-api-93x8.onrender.com';
+// Podcast API now runs on the same server/origin
+const PODCAST_API_BASE_URL = window.location.origin; // Both APIs run on the same server now
 
 let podcastGenerationInProgress = false;
-let podcastPollingInterval = null; // To hold the polling interval
+let podcastPollingInterval = null;
 
 podcastGenerateButton.addEventListener('click', () => {
     if (!podcastGenerationInProgress) {
         console.log('Requesting podcast generation via API...');
         podcastGenerationInProgress = true;
         podcastGenerateButton.disabled = true;
-        podcastStatusMessage.textContent = 'Sending request to Podcast API...';
+        podcastStatusMessage.textContent = 'Sending generation request...';
         podcastProgressBar.classList.remove('error');
         podcastProgressBar.style.backgroundColor = '#4CAF50';
         podcastProgressBar.style.width = '0%';
@@ -157,8 +144,8 @@ podcastGenerateButton.addEventListener('click', () => {
         podcastProgressText.textContent = 'Initializing...';
         podcastDownloadLinkContainer.innerHTML = '';
 
-        // Call the /generate endpoint
-        fetch(`${PODCAST_API_BASE_URL}/generate`, { method: 'POST' })
+        // Call the specific /generate-podcast endpoint
+        fetch(`${PODCAST_API_BASE_URL}/generate-podcast`, { method: 'POST' })
             .then(response => {
                 if (!response.ok) {
                     return response.json().then(err => { throw new Error(err.error || `HTTP error ${response.status}`) });
@@ -169,79 +156,61 @@ podcastGenerateButton.addEventListener('click', () => {
                 console.log('Podcast generation started:', data.message);
                 podcastStatusMessage.textContent = 'Generation in progress...';
                 podcastProgressText.textContent = 'Running... (Status polling)';
-                // Start polling the status endpoint
+                // Start polling the specific podcast status endpoint
                 startPodcastStatusPolling();
             })
             .catch(error => {
                 console.error('Error starting podcast generation:', error);
-                podcastStatusMessage.textContent = `Error starting: ${error.message}`;
-                podcastGenerationInProgress = false;
-                podcastGenerateButton.disabled = false;
-                podcastProgressBar.classList.add('error');
-                podcastProgressBar.style.width = '100%';
-                podcastProgressBar.textContent = 'Error';
+                handlePodcastError(`Error starting: ${error.message}`); // Use handler
             });
     }
 });
 
 function startPodcastStatusPolling() {
-    // Clear any existing interval
-    if (podcastPollingInterval) {
-        clearInterval(podcastPollingInterval);
-    }
+    if (podcastPollingInterval) clearInterval(podcastPollingInterval);
 
     podcastPollingInterval = setInterval(() => {
-        fetch(`${PODCAST_API_BASE_URL}/status`)
+        // Poll the specific /status-podcast endpoint
+        fetch(`${PODCAST_API_BASE_URL}/status-podcast`)
             .then(response => {
-                if (!response.ok) {
-                    // Handle potential network errors or server issues during polling
-                    throw new Error(`HTTP error ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error ${response.status}`);
                 return response.json();
             })
             .then(data => {
                 console.log('Podcast Status Poll:', data);
                 podcastStatusMessage.textContent = data.message || 'Polling status...';
 
-                // Update UI based on status
                 if (data.status === 'running') {
                     podcastProgressText.textContent = 'Running... (Status polling)';
-                    podcastProgressBar.style.width = '50%'; // Indicate running
+                    podcastProgressBar.style.width = '50%';
                     podcastProgressBar.textContent = 'Running';
                 } else if (data.status === 'completed') {
-                    handlePodcastCompletion(data); // Use the existing completion handler
-                    clearInterval(podcastPollingInterval); // Stop polling
+                    handlePodcastCompletion(data);
+                    clearInterval(podcastPollingInterval);
                 } else if (data.status === 'error') {
-                    handlePodcastError(data.error || data.message || 'Unknown error'); // Use existing error handler
-                    clearInterval(podcastPollingInterval); // Stop polling
-                } else if (data.status === 'idle') {
-                     console.warn("Polling found idle status unexpectedly.");
-                     podcastStatusMessage.textContent = "Process finished unexpectedly (idle).";
-                     podcastGenerationInProgress = false;
-                     podcastGenerateButton.disabled = false;
+                    handlePodcastError(data.error || data.message || 'Unknown error');
+                    clearInterval(podcastPollingInterval);
+                } else if (data.status === 'idle' && podcastGenerationInProgress) {
+                     console.warn("Polling found idle status unexpectedly for podcast.");
+                     handlePodcastError("Process finished unexpectedly (idle).");
+                     clearInterval(podcastPollingInterval);
+                } else if (data.status === 'idle' && !podcastGenerationInProgress) {
                      clearInterval(podcastPollingInterval);
                 }
             })
             .catch(error => {
                 console.error('Error polling podcast status:', error);
                 podcastStatusMessage.textContent = `Error polling status: ${error.message}`;
-                // Optionally stop polling after repeated errors
-                // clearInterval(podcastPollingInterval);
-                // podcastGenerationInProgress = false;
-                // podcastGenerateButton.disabled = false;
+                // Optionally stop polling
             });
     }, 3000); // Poll every 3 seconds
 }
 
-// Removed connectToPodcastStream function
-
-// Removed updatePodcastProgressBar function (no real-time progress with polling)
-
-function handlePodcastCompletion(data) { // Re-using this function name
+function handlePodcastCompletion(data) {
     console.log('Podcast Generation Complete:', data.message);
     podcastStatusMessage.textContent = 'Podcast Series Generation Complete!';
     podcastProgressText.textContent = 'Finished.';
-    podcastProgressBar.style.width = '100%'; // Show 100% on completion
+    podcastProgressBar.style.width = '100%';
     podcastProgressBar.textContent = 'Done';
     podcastGenerationInProgress = false;
     podcastGenerateButton.disabled = false;
@@ -255,6 +224,7 @@ function handlePodcastCompletion(data) { // Re-using this function name
         data.pdf_filenames.forEach(filename => {
             const listItem = document.createElement('li');
             const downloadLink = document.createElement('a');
+            // Use the shared download endpoint
             downloadLink.href = `${PODCAST_API_BASE_URL}/download/${encodeURIComponent(filename)}`;
             downloadLink.textContent = `Download ${filename}`;
             listItem.appendChild(downloadLink);
@@ -266,7 +236,7 @@ function handlePodcastCompletion(data) { // Re-using this function name
     }
 }
 
-function handlePodcastError(errorMessage) { // Re-using this function name
+function handlePodcastError(errorMessage) {
     console.error('Podcast Generation Error:', errorMessage);
     podcastStatusMessage.textContent = `Error: ${errorMessage}`;
     podcastProgressText.textContent = 'Failed.';
@@ -275,8 +245,8 @@ function handlePodcastError(errorMessage) { // Re-using this function name
     podcastProgressBar.textContent = 'Error';
     podcastGenerationInProgress = false;
     podcastGenerateButton.disabled = false;
+    if (podcastPollingInterval) clearInterval(podcastPollingInterval); // Stop polling on error
 }
 
 // --- Initial State ---
-// Ebook button is enabled by default, disabled on click
-// Podcast button is enabled by default, disabled on click
+// Buttons are enabled by default, disabled on click

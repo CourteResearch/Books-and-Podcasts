@@ -2,23 +2,29 @@ import os
 import threading
 import time
 from flask import Flask, render_template, send_from_directory, jsonify, request
-# Removed SocketIO imports, added jsonify
-# Removed CORS import as it's not needed for basic polling from same origin
-from main import run_generation_pipeline
+# Import both pipeline functions
+from main import run_ebook_generation_pipeline, run_podcast_pipeline
+import config # Import config to access directory names
 
 # --- Flask App Setup ---
 app = Flask(__name__, template_folder='frontend', static_folder='frontend', static_url_path='/frontend')
-# No SocketIO needed
-# app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'a_default_secret_key_change_me')
-# socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="https://books-and-podcasts.onrender.com")
 
-# --- Global State for Polling ---
-generation_status = {
+# --- Global State for Polling (Separate for each agent) ---
+ebook_generation_state = {
+    "is_generating": False,
     "status": "idle", # idle, running, completed, error
-    "message": "Ready to generate.",
+    "message": "Ready to generate Ebook.",
     "pdf_filename": None,
     "error": None
 }
+podcast_generation_state = {
+    "is_generating": False,
+    "status": "idle", # idle, running, completed, error
+    "message": "Ready to generate Podcast Series.",
+    "pdf_filenames": [], # Expecting multiple PDFs for podcasts
+    "error": None
+}
+# Use separate locks if high contention is expected, or one global lock for simplicity
 generation_lock = threading.Lock()
 
 # --- Routes ---
@@ -27,84 +33,160 @@ def index():
     """Serves the main HTML page."""
     return render_template('index.html')
 
-# Flask handles static files automatically via static_url_path
+# Flask handles static files automatically
 
 # --- API Routes ---
-@app.route('/generate', methods=['POST'])
+
+# --- Ebook Routes ---
+@app.route('/generate-ebook', methods=['POST'])
 def start_ebook_generation_api():
     """API endpoint to trigger the ebook generation."""
-    global generation_status
+    global ebook_generation_state
     with generation_lock:
-        if generation_status["status"] == "running":
-            return jsonify({"error": "Generation already in progress."}), 409 # Conflict
+        if ebook_generation_state["is_generating"]:
+            return jsonify({"error": "Ebook generation already in progress."}), 409
 
-        # Reset status
-        generation_status = {
-            "status": "running",
-            "message": "Generation request received. Starting process...",
-            "pdf_filename": None,
-            "error": None
+        ebook_generation_state = {
+            "is_generating": True, "status": "running",
+            "message": "Ebook generation request received...",
+            "pdf_filename": None, "error": None
         }
         print('Received start ebook generation request via API')
-
-        # Run the pipeline in a background thread
         thread = threading.Thread(target=run_ebook_pipeline_wrapper)
         thread.start()
+        return jsonify({"message": "Ebook generation started. Poll /status-ebook for updates."}), 202
 
-        return jsonify({"message": "Ebook generation started. Poll /status for updates."}), 202 # Accepted
-
-@app.route('/status')
+@app.route('/status-ebook')
 def get_ebook_status_api():
-    """API endpoint for the frontend to poll generation status."""
+    """API endpoint for the frontend to poll ebook generation status."""
     with generation_lock:
-        # Return a copy to avoid race conditions if read while updating
-        return jsonify(generation_status.copy())
+        return jsonify(ebook_generation_state.copy())
 
+# --- Podcast Routes ---
+@app.route('/generate-podcast', methods=['POST'])
+def start_podcast_generation_api():
+    """API endpoint to trigger the podcast generation."""
+    global podcast_generation_state
+    with generation_lock:
+        if podcast_generation_state["is_generating"]:
+            return jsonify({"error": "Podcast generation already in progress."}), 409
+
+        podcast_generation_state = {
+            "is_generating": True, "status": "running",
+            "message": "Podcast generation request received...",
+            "pdf_filenames": [], "error": None
+        }
+        print('Received start podcast generation request via API')
+        thread = threading.Thread(target=run_podcast_pipeline_wrapper)
+        thread.start()
+        return jsonify({"message": "Podcast generation started. Poll /status-podcast for updates."}), 202
+
+@app.route('/status-podcast')
+def get_podcast_status_api():
+    """API endpoint for the frontend to poll podcast generation status."""
+    with generation_lock:
+        return jsonify(podcast_generation_state.copy())
+
+
+# --- Shared Download Route ---
 @app.route('/download/<path:filename>')
-def download_ebook_pdf_api(filename):
-    """API endpoint to download the generated ebook PDF."""
-    # Security: Basic check
+def download_pdf_api(filename):
+    """API endpoint to download a generated PDF (ebook or podcast episode)."""
     if '..' in filename or filename.startswith('/'):
         return jsonify({"error": "Invalid filename"}), 400
-    # Serve from the app's root directory where main.py saves the PDF
-    print(f"Attempting to serve Ebook PDF via API: {filename}")
-    try:
-        return send_from_directory(directory='.', path=filename, as_attachment=True)
-    except FileNotFoundError:
-        print(f"Error: Ebook PDF not found - {filename}")
-        return jsonify({"error": "File not found"}), 404
 
-# --- Wrapper for Background Task ---
+    # Determine if it's likely an ebook or podcast based on naming convention (or check existence)
+    ebook_path = os.path.join('.', filename) # Ebooks saved in root
+    podcast_path = os.path.join('.', config.PODCAST_DIR, filename) # Podcasts saved in subdir
+
+    if os.path.exists(ebook_path) and not os.path.isdir(ebook_path):
+         print(f"Attempting to serve Ebook PDF: {filename}")
+         try:
+             return send_from_directory(directory='.', path=filename, as_attachment=True)
+         except FileNotFoundError:
+             pass # Try podcast directory next
+    elif os.path.exists(podcast_path):
+        print(f"Attempting to serve Podcast PDF: {filename} from {config.PODCAST_DIR}")
+        try:
+            return send_from_directory(directory=config.PODCAST_DIR, path=filename, as_attachment=True)
+        except FileNotFoundError:
+             pass # File not found
+
+    # If not found in either location
+    print(f"Error: PDF not found - {filename}")
+    return jsonify({"error": "File not found"}), 404
+
+
+# --- Wrappers for Background Tasks ---
 def run_ebook_pipeline_wrapper():
-    """Wrapper to run the pipeline and update the global status."""
-    global generation_status
+    """Wrapper to run the ebook pipeline and update the global status."""
+    global ebook_generation_state
+    pipeline_result = None
+    pipeline_exception = None
     try:
-        # Run the refactored pipeline function
-        result = run_generation_pipeline() # No longer takes socketio instance
-
-        # Update status based on result
-        with generation_lock:
-            generation_status["status"] = result.get("status", "error") # completed or error
-            generation_status["message"] = result.get("message", "An unknown error occurred.")
-            generation_status["pdf_filename"] = result.get("pdf_filename")
-            if result.get("status") == "error":
-                 generation_status["error"] = result.get("message")
-
+        pipeline_result = run_ebook_generation_pipeline()
     except Exception as e:
-        # Catch unexpected errors from the pipeline itself
-        print(f"Critical error during ebook pipeline execution in wrapper: {e}")
-        with generation_lock:
-            generation_status["status"] = "error"
-            generation_status["message"] = f"Critical pipeline error: {e}"
-            generation_status["error"] = str(e)
-            generation_status["pdf_filename"] = None
+        print(f"Critical error during ebook pipeline execution: {e}")
+        pipeline_exception = e
     finally:
-        print(f"Ebook background task finished with status: {generation_status['status']}")
+        with generation_lock:
+            if pipeline_exception:
+                ebook_generation_state.update({
+                    "status": "error", "message": f"Critical pipeline error: {pipeline_exception}",
+                    "error": str(pipeline_exception), "pdf_filename": None
+                })
+            elif pipeline_result:
+                 ebook_generation_state.update({
+                    "status": pipeline_result.get("status", "error"),
+                    "message": pipeline_result.get("message", "Unknown completion state."),
+                    "pdf_filename": pipeline_result.get("pdf_filename"),
+                    "error": pipeline_result.get("message") if pipeline_result.get("status") == "error" else None
+                 })
+            else: # Fallback
+                 ebook_generation_state.update({
+                    "status": "error", "message": "Pipeline finished with unknown state.",
+                    "error": "Unknown state.", "pdf_filename": None
+                 })
+            ebook_generation_state["is_generating"] = False
+        print(f"Ebook background task finished with status: {ebook_generation_state['status']}")
+
+def run_podcast_pipeline_wrapper():
+    """Wrapper to run the podcast pipeline and update the global status."""
+    global podcast_generation_state
+    pipeline_result = None
+    pipeline_exception = None
+    try:
+        pipeline_result = run_podcast_pipeline()
+    except Exception as e:
+        print(f"Critical error during podcast pipeline execution: {e}")
+        pipeline_exception = e
+    finally:
+        with generation_lock:
+            if pipeline_exception:
+                podcast_generation_state.update({
+                    "status": "error", "message": f"Critical pipeline error: {pipeline_exception}",
+                    "error": str(pipeline_exception), "pdf_filenames": []
+                })
+            elif pipeline_result:
+                 podcast_generation_state.update({
+                    "status": pipeline_result.get("status", "error"),
+                    "message": pipeline_result.get("message", "Unknown completion state."),
+                    "pdf_filenames": pipeline_result.get("pdf_filenames", []),
+                    "error": pipeline_result.get("message") if pipeline_result.get("status") == "error" else None
+                 })
+            else: # Fallback
+                 podcast_generation_state.update({
+                    "status": "error", "message": "Pipeline finished with unknown state.",
+                    "error": "Unknown state.", "pdf_filenames": []
+                 })
+            podcast_generation_state["is_generating"] = False
+        print(f"Podcast background task finished with status: {podcast_generation_state['status']}")
 
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    print("Starting Ebook Flask API server (polling)...")
+    print("Starting Unified Flask API server (polling)...")
+    # Ensure podcast directory exists (ebook saves to root, chapters dir handled in main)
+    os.makedirs(config.PODCAST_DIR, exist_ok=True)
     # Use Gunicorn in production via Procfile
-    # Run directly with Flask's development server for local testing (debug=False for prod simulation)
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False)
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False) # Use standard port 5000
