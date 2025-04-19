@@ -90,94 +90,132 @@ def podcast_generate_outline(model, topic, num_episodes):
         raise
 
 def podcast_parse_outline(outline_text):
-    """Parses the generated podcast outline text. Final robust version 3."""
-    print("Parsing podcast outline...")
-    # print("--- Outline Text Received ---") # Debugging: Print full outline
-    # print(outline_text)
-    # print("--- End Outline Text ---")
+    """Parses the generated podcast outline text using a line-by-line approach (v5)."""
+    print("Parsing podcast outline (Line-by-Line approach v5)...")
     episodes = []
-    episode_sections = []
-    try:
-        # Attempt 1: Split by lines starting with "**Episode X:**", allowing optional whitespace
-        # Make regex slightly simpler: look for start, optional space/stars, Episode, space, digits, colon, optional stars, space
-        pattern1 = r'(^\s*(?:\*{1,2})?Episode\s+\d+:\s*(?:\*{1,2})?\s*)'
-        sections_attempt1 = re.split(pattern1, outline_text, flags=re.MULTILINE | re.IGNORECASE)
+    current_episode_lines = []
+    episode_num_counter = 0
+    # Regex to find potential episode headers at the start of a line
+    # Regex specifically for '**Episode X: Title**' or similar, allowing optional surrounding whitespace
+    # It also captures the number (group 1) and title (group 2)
+    header_pattern = re.compile(
+        r'^\s*\*{2}Episode\s+(\d+)\s*:\s*(.*?)\s*\*{0,2}\s*$', # More specific pattern
+        flags=re.IGNORECASE
+    )
+    # Keep numbered list pattern for potential fallback/alternative formats if needed later
+    numbered_list_pattern = re.compile(r'^\s*(\d+)\.\s+(.*)')
 
-        if len(sections_attempt1) > 1:
-            combined_sections = []
-            i = 1
-            while i < len(sections_attempt1):
-                marker = sections_attempt1[i]
-                content = sections_attempt1[i+1] if (i+1) < len(sections_attempt1) else ""
-                combined_sections.append(marker + content)
-                i += 2
-            episode_sections = combined_sections
-            print(f"Found {len(episode_sections)} sections using 'Episode X:' split.")
-        else:
-            # Fallback 1: Try splitting by numbered list "N."
-            print("Warning: 'Episode X:' pattern not found. Trying numbered list splitting...")
-            pattern2 = r'(^\s*\d+\.\s+)'
-            sections_attempt2 = re.split(pattern2, outline_text, flags=re.MULTILINE)
-            if len(sections_attempt2) > 1:
-                combined_sections = []
-                i = 1
-                while i < len(sections_attempt2):
-                    marker = sections_attempt2[i]
-                    content = sections_attempt2[i+1] if (i+1) < len(sections_attempt2) else ""
-                    combined_sections.append(marker + content)
-                    i += 2
-                episode_sections = combined_sections
-                print(f"Numbered list splitting found {len(episode_sections)} potential sections.")
-            else:
-                 raise ValueError("Could not split podcast outline into episodes using known patterns ('**Episode X:**' or 'N.').")
+    lines = outline_text.strip().split('\n')
+    in_episode_block = False # Flag to track if we are inside a potential episode block
 
+    for idx, line in enumerate(lines):
+        line_strip = line.strip()
+        if not line_strip: # Skip empty lines between blocks
+            continue
 
-        # --- Process the identified sections ---
-        print(f"--- Processing {len(episode_sections)} identified sections ---")
-        for i, section in enumerate(episode_sections):
-             episode_num = i + 1
-             section = section.strip()
-             if not section:
-                 print(f"  Skipping empty section {i+1}")
-                 continue
-             print(f"  Processing section {i+1}...")
+        header_match = header_pattern.match(line_strip)
+        numbered_match = numbered_list_pattern.match(line_strip)
 
-             # Extract Title: Assume title is the first line, potentially after marker
-             title = f"Episode {episode_num}" # Default
-             first_line = section.split('\n')[0].strip()
-             # Try removing markers like "**Episode X:**" or "N." from the start of the first line
-             title_match_marker = re.match(r'^\s*(?:\*{1,2}Episode\s+\d+:\*{1,2}|\d+\.\s+)?\s*(.*?)\s*$', first_line, flags=re.IGNORECASE)
-             if title_match_marker and title_match_marker.group(1):
-                 potential_title = title_match_marker.group(1).strip().strip('*')
-                 # Avoid using 'Key Points:' as title
-                 if not re.match(r'(Key Points)\s*:', potential_title, re.IGNORECASE):
-                     title = potential_title
-                     print(f"    Parsed title: '{title}'")
-                 else: print(f"    First line looked like 'Key Points:', using default title.")
-             else: print(f"    Could not parse title from first line, using default title.")
-
-             # Extract Key Points
-             points_text = "No key points found."
-             # Find "Key Points:" case-insensitively, capture everything after it
-             points_match = re.search(r'Key Points:(.*)', section, re.IGNORECASE | re.DOTALL)
-             if points_match:
-                 raw_points = points_match.group(1).strip()
-                 # Keep all non-empty lines after "Key Points:" as the points
-                 point_lines = [p.strip() for p in raw_points.split('\n') if p.strip()]
-                 if point_lines: points_text = "\n".join(point_lines)
-                 print(f"    Extracted Key Points.")
+        is_new_header = False
+        if header_match:
+            is_new_header = True
+            print(f"  Line {idx}: Found 'Episode X:' pattern.")
+        elif numbered_match and not in_episode_block: # Only treat numbered list as header if not already inside an episode
+             # Check if the content looks like a title rather than a detail point
+             potential_title = numbered_match.group(2).strip()
+             if not re.match(r'(Summary|Key Points|Emotional Arc|Reveal|Title)\s*:', potential_title, re.IGNORECASE):
+                  is_new_header = True
+                  print(f"  Line {idx}: Found numbered list pattern potentially starting an episode.")
              else:
-                 print(f"    'Key Points:' label not found in section.")
+                  print(f"  Line {idx}: Numbered list item looks like a detail point, ignoring as header.")
+
+        if is_new_header:
+            # Process the previous block if it exists
+            if current_episode_lines:
+                episode_num_counter += 1
+                section_text = "\n".join(current_episode_lines).strip()
+                parsed_episode = parse_single_podcast_section(section_text, episode_num_counter)
+                if parsed_episode:
+                    episodes.append(parsed_episode)
+
+            # Start the new episode block
+            current_episode_lines = [line] # Include the header line
+            in_episode_block = True
+        elif in_episode_block:
+            # Append line to the current episode block
+            current_episode_lines.append(line)
+        else:
+            # Skip lines before the first recognized header
+            print(f"  Skipping line {idx} before first header: '{line_strip}'")
 
 
-             episodes.append({"number": episode_num, "title": title, "key_points": points_text, "full_section": section})
+    # Process the very last episode block after the loop finishes
+    if current_episode_lines:
+        episode_num_counter += 1
+        section_text = "\n".join(current_episode_lines).strip()
+        parsed_episode = parse_single_podcast_section(section_text, episode_num_counter)
+        if parsed_episode:
+            episodes.append(parsed_episode)
 
-        if not episodes: raise ValueError("Podcast outline parsing failed to extract any episode details after splitting.")
-        print(f"Successfully parsed {len(episodes)} podcast episodes.")
-        return episodes
-    except Exception as e:
-        print(f"Error parsing podcast outline: {e}")
-        raise
+    if not episodes:
+        raise ValueError("Podcast outline parsing failed: No episode sections could be identified.")
+
+    print(f"Successfully parsed {len(episodes)} podcast episodes.")
+    return episodes
+
+
+def parse_single_podcast_section(section_text, expected_episode_num):
+    """Helper function to parse details from a single episode's text block."""
+    print(f"  Processing section for Episode {expected_episode_num}...")
+    title = f"Episode {expected_episode_num}" # Default title
+    key_points = "No key points found."
+    lines = section_text.split('\n')
+    first_line = lines[0].strip()
+
+    # Extract Title from the first line (which should be the header)
+    # Regex tries to capture content after potential markers like "Episode X:", "N.", "#", "**" etc.
+    title_match_marker = re.match(r'^\s*(?:#\s*|\*{1,2})?(?:Episode|Chapter)\s+\d+\s*:?\*{0,2}\s*|(?:\d+\.\s+)?\s*(.*?)\s*$', first_line, flags=re.IGNORECASE)
+
+    if title_match_marker and title_match_marker.group(1):
+        potential_title = title_match_marker.group(1).strip().strip('*:') # Strip extra chars
+        if potential_title and not re.match(r'(Key Points)\s*:', potential_title, re.IGNORECASE):
+            title = potential_title
+            print(f"    Parsed title: '{title}'")
+        else: print(f"    Header line content ('{potential_title}') unusable or is 'Key Points:', using default title.")
+    else: print(f"    Could not parse title from header line ('{first_line}'), using default title.")
+
+    # Extract Key Points (look for the label and subsequent list items in the rest of the section)
+    key_points_started = False
+    point_lines = []
+    key_points_section_match = re.search(r'Key Points:(.*)', section_text, re.IGNORECASE | re.DOTALL)
+    if key_points_section_match:
+        raw_points_text = key_points_section_match.group(1)
+        for line in raw_points_text.split('\n'):
+            line_strip = line.strip()
+            if line_strip.startswith(('-', '*')) or (key_points_started and line_strip):
+                 point_lines.append(line_strip)
+                 key_points_started = True
+            elif not key_points_started and line_strip: # First non-empty line after label
+                 point_lines.append(line_strip)
+                 key_points_started = True
+            elif key_points_started and not line_strip:
+                 continue # Allow empty lines between points
+
+        if point_lines:
+            points_text = "\n".join(point_lines).strip()
+            print(f"    Extracted Key Points.")
+        else:
+            print(f"    'Key Points:' label found, but no list items detected after it.")
+    else:
+        print(f"    'Key Points:' label not found in section.")
+
+    return {
+        "number": expected_episode_num,
+        "title": title,
+        "key_points": points_text,
+        "full_section": section_text # Keep the original block
+    }
+
 
 def podcast_generate_episode_pdf(model, episode_details, series_topic, total_episodes):
     """Generates content for a single podcast episode and saves it as a PDF."""
