@@ -4,7 +4,8 @@ import time
 from flask import Flask, render_template, send_from_directory, jsonify, request
 # Import the specific pipeline functions from the agents module
 from agents.ebook_agent import run_ebook_generation_pipeline
-from agents.podcast_agent import run_podcast_pipeline
+# Import the refactored podcast agent functions
+from agents.podcast_agent import generate_podcast_topic, run_podcast_pipeline
 import config # Import config to access directory names
 
 # --- Flask App Setup ---
@@ -19,9 +20,10 @@ ebook_generation_state = {
     "error": None
 }
 podcast_generation_state = {
-    "is_generating": False,
-    "status": "idle", # idle, running, completed, error
+    "is_generating": False, # True if *any* part of the process is running
+    "status": "idle", # idle, generating_topic, awaiting_approval, generating_podcast, completed, error
     "message": "Ready to generate Podcast Series.",
+    "proposed_topic": None, # Store the topic awaiting approval
     "pdf_filenames": [], # Expecting multiple PDFs for podcasts
     "error": None
 }
@@ -63,24 +65,64 @@ def get_ebook_status_api():
     with generation_lock:
         return jsonify(ebook_generation_state.copy())
 
-# --- Podcast Routes ---
-@app.route('/generate-podcast', methods=['POST'])
-def start_podcast_generation_api():
-    """API endpoint to trigger the podcast generation."""
+# --- Podcast Routes (Refactored for Approval Flow) ---
+
+@app.route('/generate-podcast-topic', methods=['POST'])
+def start_podcast_topic_generation_api():
+    """API endpoint to trigger the podcast *topic* generation."""
     global podcast_generation_state
     with generation_lock:
-        if podcast_generation_state["is_generating"]:
-            return jsonify({"error": "Podcast generation already in progress."}), 409
+        # Allow starting topic generation even if previous run completed/errored, but not if currently active
+        if podcast_generation_state["is_generating"] and podcast_generation_state["status"] not in ["completed", "error", "idle"]:
+             return jsonify({"error": f"Podcast process already active ({podcast_generation_state['status']})."}), 409
 
+        # Reset state for new topic generation
         podcast_generation_state = {
-            "is_generating": True, "status": "running",
-            "message": "Podcast generation request received...",
-            "pdf_filenames": [], "error": None
+            "is_generating": True,
+            "status": "generating_topic",
+            "message": "Generating potential podcast topic...",
+            "proposed_topic": None,
+            "pdf_filenames": [],
+            "error": None
         }
-        print('Received start podcast generation request via API')
-        thread = threading.Thread(target=run_podcast_pipeline_wrapper)
+        print('Received start podcast *topic* generation request via API')
+        thread = threading.Thread(target=run_topic_generation_wrapper)
         thread.start()
-        return jsonify({"message": "Podcast generation started. Poll /status-podcast for updates."}), 202
+        return jsonify({"message": "Podcast topic generation started. Poll /status-podcast for updates."}), 202
+
+
+@app.route('/generate-podcast', methods=['POST'])
+def start_podcast_content_generation_api():
+    """API endpoint to trigger the podcast *content* generation *after* topic approval."""
+    global podcast_generation_state
+    data = request.get_json()
+    approved_topic = data.get('topic')
+
+    if not approved_topic:
+        return jsonify({"error": "Missing 'topic' in request body."}), 400
+
+    with generation_lock:
+        # Ensure we are in the correct state to proceed
+        if podcast_generation_state["status"] != "awaiting_approval":
+            return jsonify({"error": f"Cannot start content generation. Current status: {podcast_generation_state['status']}."}), 409
+        if podcast_generation_state["proposed_topic"] != approved_topic:
+             # This check prevents starting with a topic different from the one proposed/approved
+             return jsonify({"error": f"Approved topic '{approved_topic}' does not match proposed topic '{podcast_generation_state['proposed_topic']}'."}), 400
+
+        # Update state to reflect content generation starting
+        podcast_generation_state.update({
+            "is_generating": True,
+            "status": "generating_podcast",
+            "message": f"Approved topic '{approved_topic}'. Starting podcast content generation...",
+            "pdf_filenames": [], # Reset filenames for this run
+            "error": None
+        })
+        print(f"Received start podcast *content* generation request via API for topic: {approved_topic}")
+        # Pass the approved topic to the wrapper
+        thread = threading.Thread(target=run_podcast_pipeline_wrapper, args=(approved_topic,))
+        thread.start()
+        return jsonify({"message": "Podcast content generation started. Poll /status-podcast for updates."}), 202
+
 
 @app.route('/status-podcast')
 def get_podcast_status_api():
@@ -151,37 +193,111 @@ def run_ebook_pipeline_wrapper():
             ebook_generation_state["is_generating"] = False
         print(f"Ebook background task finished with status: {ebook_generation_state['status']}")
 
-def run_podcast_pipeline_wrapper():
-    """Wrapper to run the podcast pipeline and update the global status."""
-    global podcast_generation_state
+# --- Wrappers for Background Tasks ---
+def run_ebook_pipeline_wrapper():
+    """Wrapper to run the ebook pipeline and update the global status."""
+    global ebook_generation_state
     pipeline_result = None
     pipeline_exception = None
     try:
-        pipeline_result = run_podcast_pipeline()
+        pipeline_result = run_ebook_generation_pipeline()
     except Exception as e:
-        print(f"Critical error during podcast pipeline execution: {e}")
+        print(f"Critical error during ebook pipeline execution: {e}")
         pipeline_exception = e
     finally:
         with generation_lock:
             if pipeline_exception:
-                podcast_generation_state.update({
+                ebook_generation_state.update({
                     "status": "error", "message": f"Critical pipeline error: {pipeline_exception}",
-                    "error": str(pipeline_exception), "pdf_filenames": []
+                    "error": str(pipeline_exception), "pdf_filename": None
                 })
             elif pipeline_result:
-                 podcast_generation_state.update({
+                 ebook_generation_state.update({
                     "status": pipeline_result.get("status", "error"),
                     "message": pipeline_result.get("message", "Unknown completion state."),
-                    "pdf_filenames": pipeline_result.get("pdf_filenames", []),
+                    "pdf_filename": pipeline_result.get("pdf_filename"),
                     "error": pipeline_result.get("message") if pipeline_result.get("status") == "error" else None
                  })
             else: # Fallback
-                 podcast_generation_state.update({
+                 ebook_generation_state.update({
                     "status": "error", "message": "Pipeline finished with unknown state.",
+                    "error": "Unknown state.", "pdf_filename": None
+                 })
+            ebook_generation_state["is_generating"] = False
+        print(f"Ebook background task finished with status: {ebook_generation_state['status']}")
+
+
+# --- New Wrapper for Topic Generation ---
+def run_topic_generation_wrapper():
+    """Wrapper to run only the topic generation part."""
+    global podcast_generation_state
+    proposed_topic = None
+    topic_exception = None
+    try:
+        proposed_topic = generate_podcast_topic() # Call the new agent function
+    except Exception as e:
+        print(f"Critical error during podcast topic generation: {e}")
+        topic_exception = e
+    finally:
+        with generation_lock:
+            if topic_exception:
+                podcast_generation_state.update({
+                    "status": "error", "message": f"Failed to generate topic: {topic_exception}",
+                    "error": str(topic_exception), "proposed_topic": None, "is_generating": False
+                })
+            elif proposed_topic:
+                 podcast_generation_state.update({
+                    "status": "awaiting_approval", # Move to approval state
+                    "message": f"Proposed Topic: '{proposed_topic}'. Please approve or request another.",
+                    "proposed_topic": proposed_topic,
+                    "error": None,
+                    "is_generating": False # Topic generation is done, waiting for user
+                 })
+            else: # Fallback if function returns None without error
+                 podcast_generation_state.update({
+                    "status": "error", "message": "Topic generation finished without a topic.",
+                    "error": "Unknown topic generation state.", "proposed_topic": None, "is_generating": False
+                 })
+        print(f"Podcast topic generation finished with status: {podcast_generation_state['status']}")
+
+
+# --- Modified Wrapper for Content Generation ---
+def run_podcast_pipeline_wrapper(approved_topic):
+    """Wrapper to run the podcast *content* pipeline and update the global status."""
+    global podcast_generation_state
+    pipeline_result = None
+    pipeline_exception = None
+    try:
+        # Pass the approved topic to the pipeline function
+        pipeline_result = run_podcast_pipeline(approved_topic)
+    except Exception as e:
+        print(f"Critical error during podcast *content* pipeline execution: {e}")
+        pipeline_exception = e
+    finally:
+        with generation_lock:
+            if pipeline_exception:
+                # Update state based on content pipeline result
+                podcast_generation_state.update({
+                    "status": "error", "message": f"Critical content pipeline error: {pipeline_exception}",
+                    "error": str(pipeline_exception), "pdf_filenames": [] # Keep any partial results if desired
+                })
+            elif pipeline_result:
+                 # Use 'completed' status from the pipeline result if successful
+                 final_status = "completed" if pipeline_result.get("status") == "success" else "error"
+                 podcast_generation_state.update({
+                    "status": final_status,
+                    "message": pipeline_result.get("message", "Content generation finished."),
+                    "pdf_filenames": pipeline_result.get("pdf_filenames", []),
+                    "error": pipeline_result.get("message") if final_status == "error" else None
+                 })
+            else: # Fallback
+                 podcast_generation_state.update({
+                    "status": "error", "message": "Content pipeline finished with unknown state.",
                     "error": "Unknown state.", "pdf_filenames": []
                  })
+            # Mark generation as fully stopped only after content pipeline finishes or errors out
             podcast_generation_state["is_generating"] = False
-        print(f"Podcast background task finished with status: {podcast_generation_state['status']}")
+        print(f"Podcast *content* background task finished with status: {podcast_generation_state['status']}")
 
 
 # --- Main Execution ---

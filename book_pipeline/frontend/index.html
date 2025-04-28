@@ -137,8 +137,18 @@
                 <div class="progress-bar" id="podcast-progressBar">0%</div>
             </div>
             <div class="progress-text" id="podcast-progress-text">Waiting to start...</div>
+
+            <!-- New section for topic approval -->
+            <div id="podcast-approval-container" style="display: none; margin-top: 15px; border: 1px solid #ccc; padding: 15px; border-radius: 4px; background-color: #f9f9f9;">
+                <h4>Topic Approval</h4>
+                <p>Proposed Topic: <strong id="proposed-topic-text"></strong></p>
+                <button id="podcast-approveButton" style="margin-right: 10px; background-color: #28a745;">Proceed with this Topic</button>
+                <button id="podcast-rejectButton" style="background-color: #ffc107; color: #333;">Find Another Topic</button>
+            </div>
+            <!-- End of new section -->
+
             <div class="download-link-container" id="podcast-download-link-container"></div>
-            <button id="podcast-generateButton">Create Podcast Series</button>
+            <button id="podcast-generateButton">Create Podcast Series</button> <!-- This button will now trigger topic generation -->
         </div>
     </div>
 

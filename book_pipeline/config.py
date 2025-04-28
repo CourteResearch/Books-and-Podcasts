@@ -35,7 +35,7 @@ EBOOK_TARGET_WORD_MAX = 2000
 
 # API Settings (adjust as needed)
 # Note: Model name might change depending on API version/availability
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash") # Load model from .env or default
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro") # Load model from .env or default
 
 # --- Podcast Specific Settings ---
 PODCAST_DIR = "podcasts" # Directory to store generated PDF episodes

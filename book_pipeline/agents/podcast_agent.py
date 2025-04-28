@@ -24,44 +24,92 @@ from config import (
 # ==============================================
 
 def podcast_find_and_assess_topic(model):
-    """Identifies a trending tech topic and assesses its viability."""
-    print("Finding and assessing trending tech topic...")
+    """Identifies several trending tech topics suitable for a YouTube podcast audience."""
+    print("Finding engaging tech topics suitable for YouTube...")
     prompt = (
-        f"Identify 3-5 current trending topics in technology, particularly those gaining traction on platforms like YouTube or major tech news sites ({TREND_SOURCE_HINT}). "
-        f"For each topic, briefly explain why it's trending.\n"
-        f"Then, select the ONE topic you think has the most potential for a {NUM_EPISODES_MIN}-{NUM_EPISODES_MAX} episode podcast series that progresses from foundational concepts to more advanced aspects. "
-        f"Finally, assess the selected topic's viability: list 3-5 potential sub-topics or angles that could be covered across the series to demonstrate its depth.\n\n"
-        f"Format your response clearly:\n"
-        f"Trending Topics:\n"
-        f"1. [Topic 1]: [Reason]\n"
-        f"2. [Topic 2]: [Reason]\n"
-        f"...\n\n"
-        f"Selected Topic: [Selected Topic Name]\n\n"
-        f"Viability Assessment (Sub-topics/Angles):\n"
-        f"- [Angle 1]\n"
-        f"- [Angle 2]\n"
-        f"- [Angle 3]\n"
-        f"..."
-    )
+    f"Act like a YouTube growth strategist and tech trend analyst. Identify **5-7 ultra-specific, high-impact tech topics** that are ideal for a {NUM_EPISODES_MIN}-{NUM_EPISODES_MAX} episode podcast series designed to capture attention on **YouTube**.\n\n"
+    
+    f"Each topic should:\n"
+    f"- Be **based on current discussions** within the **last 1–3 months** from YouTube trends, Hacker News, Reddit (/r/technology, /r/programming), or popular tech news sources ({TREND_SOURCE_HINT}).\n"
+    f"- Be **SEO-optimized**: use keyword-rich titles or phrasing that aligns with how people search on YouTube.\n"
+    f"- Have **clear hooks**: controversial opinions, paradigm shifts, ethical dilemmas, hype vs. reality, or deep dives into emerging technologies.\n"
+    f"- Be **specific enough** to create 7-10 tightly focused episodes (e.g. 'OpenAI vs Google AI arms race' instead of 'AI evolution').\n"
+    f"- Be **visually rich** and conceptually engaging for YouTube (e.g. demos, visual storytelling, diagrams, real-world case studies).\n\n"
+
+    f"For each suggested topic:\n"
+    f"- Provide a **title** that’s YouTube-optimized.\n"
+    f"- Explain **why it's trending**, with a specific platform or source.\n"
+    f"- Suggest **episode breakdown ideas** or angles that can span a mini-series.\n\n"
+
+    f"**Avoid:**\n"
+    f"- Broad, evergreen topics with no fresh angle.\n"
+    f"- Overly academic or niche discussions with no general interest.\n"
+    f"- Buzzwords without substance (e.g., 'AI is the future' with no angle).\n\n"
+
+    f"Format:\n"
+    f"1. [SEO-optimized clickable topic title]\n"
+    f"   - Why it's trending right now (with source or evidence)\n"
+    f"   - Multi-episode angle breakdown or key talking points\n"
+    f"2. ..."
+)
+
     try:
+        # Add a safety setting to potentially reduce repetitive outputs, if supported by the model/API version
+        # Note: This might need adjustment based on the specific genai library version and model capabilities.
+        # Example using hypothetical 'temperature' or 'top_p' if available:
+        # generation_config = genai.types.GenerationConfig(temperature=0.8, top_p=0.9)
+        # response = model.generate_content(prompt, generation_config=generation_config)
+        # If specific safety settings are available:
+        # safety_settings=[
+        #     { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_LOW_AND_ABOVE" },
+        #     { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_LOW_AND_ABOVE" },
+        # ]
+        # response = model.generate_content(prompt, safety_settings=safety_settings)
+        # --- Using default generation for now ---
         response = model.generate_content(prompt)
         if not response.parts: raise ValueError("Podcast topic identification failed.")
-        assessment_text = response.text.strip()
-        print(f"Podcast Topic Assessment:\n{assessment_text}\n")
-        selected_topic_match = re.search(r"Selected Topic:(.*?)(\n\n|$)", assessment_text, re.IGNORECASE | re.DOTALL)
-        if not selected_topic_match:
-            first_topic_match = re.search(r"1\.\s*\[?(.*?)]?:", assessment_text, re.IGNORECASE)
-            if first_topic_match:
-                selected_topic = first_topic_match.group(1).strip()
-                print(f"Warning: Could not parse 'Selected Topic'. Using first topic: '{selected_topic}'")
-            else: raise ValueError("Could not parse selected podcast topic.")
-        else: selected_topic = selected_topic_match.group(1).strip().strip('*') # Also strip potential bold markers
-        if "Viability Assessment" not in assessment_text or len(re.findall(r"-\s*\[", assessment_text)) < 2:
-             print(f"Warning: Podcast viability assessment for '{selected_topic}' seems limited.")
+        topic_list_text = response.text.strip()
+        print(f"Potential Podcast Topics Found:\n{topic_list_text}\n")
+
+        # Extract topics using regex (find lines starting with number and period)
+        potential_topics = re.findall(r"^\s*\d+\.\s*\[?(.*?)]?:\s*.*", topic_list_text, re.MULTILINE | re.IGNORECASE)
+
+        if not potential_topics:
+            # Fallback: Try to extract lines that seem like topics if the primary regex fails
+            potential_topics = [line.split(':')[0].strip() for line in topic_list_text.split('\n') if ':' in line and len(line) > 10]
+            if not potential_topics:
+                raise ValueError("Could not parse any potential podcast topics from the response.")
+            print(f"Warning: Used fallback topic parsing. Found: {potential_topics}")
+
+        # Clean up extracted topic names (remove potential leading/trailing junk)
+        potential_topics = [topic.strip().strip('*[]') for topic in potential_topics]
+
+        if not potential_topics:
+             raise ValueError("No valid topics extracted after cleaning.")
+
+        # Randomly select one topic
+        selected_topic = random.choice(potential_topics)
+        print(f"Randomly selected topic: '{selected_topic}'")
         return selected_topic
     except Exception as e:
-        print(f"Error finding/assessing podcast topic: {e}")
+        print(f"Error finding/selecting podcast topic: {e}")
         raise
+
+
+# --- New function to generate only the topic ---
+def generate_podcast_topic():
+    """Generates and returns a potential podcast topic."""
+    print("--- Step 1: Finding Podcast Topic ---")
+    try:
+        model = configure_gemini()
+        series_topic = podcast_find_and_assess_topic(model)
+        if not series_topic:
+            raise ValueError("Failed to determine podcast topic.")
+        print(f"Proposed Podcast Topic: '{series_topic}'")
+        return series_topic
+    except Exception as e:
+        print(f"Error during topic generation: {e}")
+        raise # Re-raise the exception to be caught by the caller
 
 def podcast_generate_outline(model, topic, num_episodes):
     """Generates the podcast series outline."""
@@ -262,28 +310,29 @@ def podcast_generate_episode_pdf(model, episode_details, series_topic, total_epi
         print(f"Error generating Podcast Episode {episode_num} ('{episode_title}'): {e}")
         raise
 
-def run_podcast_pipeline():
-    """Main pipeline logic for podcast generation. Returns result dict."""
-    global current_api_key_index
-    current_api_key_index = 0
+# --- Modified function to run the pipeline *after* topic approval ---
+def run_podcast_pipeline(series_topic):
+    """Main pipeline logic for podcast generation, starting *after* topic approval.
+       Accepts the approved topic as an argument. Returns result dict."""
+    # Note: API key index handling might need review if calls are split across requests
+    # For now, assume configure_gemini handles it per call.
     all_pdf_filenames = []
     try:
-        print("Starting Autonomous Podcast Pipeline...")
+        print(f"Starting Autonomous Podcast Pipeline for topic: '{series_topic}'...")
         print("--- Step 0: Cleaning Up Previous Podcast Run ---")
+        # Cleanup remains here, executed when the *full* generation starts
         if os.path.exists(PODCAST_OUTLINE_FILE):
             try: os.remove(PODCAST_OUTLINE_FILE); print(f"Removed old podcast outline: {PODCAST_OUTLINE_FILE}")
             except Exception as e: print(f"Warning: Could not remove {PODCAST_OUTLINE_FILE}: {e}")
         if os.path.exists(PODCAST_DIR):
+            # Be careful removing the whole dir if intermediate files are needed later
+            # For now, assuming a clean slate per full generation run is okay.
             try: shutil.rmtree(PODCAST_DIR); print(f"Removed old podcast dir: {PODCAST_DIR}")
             except Exception as e: print(f"Warning: Could not remove {PODCAST_DIR}: {e}")
         os.makedirs(PODCAST_DIR, exist_ok=True)
 
-        print("--- Step 1: Finding Podcast Topic ---")
-        model = configure_gemini()
-        series_topic = podcast_find_and_assess_topic(model)
-        if not series_topic: raise ValueError("Failed to determine podcast topic.")
-
-        print("\n--- Step 2: Generating Podcast Outline ---")
+        # --- Step 1 (Topic Finding) is now done *before* calling this function ---
+        print(f"\n--- Step 2: Generating Podcast Outline for '{series_topic}' ---")
         num_episodes = random.randint(NUM_EPISODES_MIN, NUM_EPISODES_MAX)
         model = configure_gemini()
         outline_text = podcast_generate_outline(model, series_topic, num_episodes)
