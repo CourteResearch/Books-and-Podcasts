@@ -13,7 +13,7 @@ else:
 # Initialize the Gemini Model (specify 1.5 Pro)
 # Make sure the model name 'gemini-1.5-pro-latest' is correct for your access
 try:
-    model = genai.GenerativeModel('gemini-2.0-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
     print("Gemini model initialized successfully.")
 except Exception as e:
     print(f"Error initializing Gemini model: {e}")

@@ -115,22 +115,6 @@ def ebook_parse_outline(outline_text, genre="Thriller"):
     print(f"Parsing ebook outline for genre: {genre}...")
     chapters = []
 
-    # 1. Isolate the Outline Section
-    outline_section_match = re.search(r'(?:##\s*1\.?\s*Outline Creation|###\s*Outline|^\s*\*+\s*Outline\s*\*+)\s*\n(.*?)(?:\n##\s*2\.?\s*Chapter Writing|\Z)', outline_text, re.IGNORECASE | re.DOTALL | re.MULTILINE)
-    if outline_section_match:
-        outline_content = outline_section_match.group(1).strip()
-        print("Isolated outline section for parsing.")
-    else:
-        outline_content = outline_text.strip()
-        print("No specific outline section markers found, parsing entire content.")
-
-    if not outline_content.strip():
-        # If after isolation and stripping, the content is empty, no point proceeding.
-        debug_original_outline_preview = outline_text[:500] + ("..." if len(outline_text) > 500 else "")
-        print(f"DEBUG: Original outline_text resulted in empty outline_content. Original preview:\n---\n{debug_original_outline_preview}\n---")
-        raise ValueError("Outline content is empty after isolation and stripping.")
-
-    # 2. Find all chapter sections using iterative pattern matching with re.finditer
     # Define patterns from most specific/likely to more general
     # Named group 'num' for chapter number, 'header' for the full matched header text
     chapter_marker_patterns = [
@@ -140,10 +124,32 @@ def ebook_parse_outline(outline_text, genre="Thriller"):
         re.compile(r'^(?P<header>\s*(?P<num>\d+)\.\s*(?!Summary:|Emotional Arc:|Title:|Key Twist|Key Plot Point).*\S.*)$', re.MULTILINE | re.IGNORECASE) # N. Some Title (ensure it's not a list item)
     ]
 
+    # 1. Find the start of the actual outline content by looking for the first chapter marker
+    first_chapter_start_pos = -1
+    for pattern in chapter_marker_patterns:
+        match = pattern.search(outline_text)
+        if match:
+            first_chapter_start_pos = match.start()
+            print(f"Found first chapter marker with pattern '{pattern.pattern}' at position {first_chapter_start_pos}.")
+            break
+
+    if first_chapter_start_pos == -1:
+        debug_outline_preview = outline_text[:1000] + ("..." if len(outline_text) > 1000 else "")
+        print(f"DEBUG: No chapter markers found in the entire outline_text. Preview:\n---\n{debug_outline_preview}\n---")
+        raise ValueError("Could not find any chapter markers in the ebook outline. Review logged outline_content.")
+
+    # Set outline_content to start from the first identified chapter marker
+    outline_content = outline_text[first_chapter_start_pos:].strip()
+    print(f"DEBUG: Outline content (first 500 chars after initial trim):\n---\n{outline_content[:500]}\n---")
+
+    if not outline_content.strip():
+        raise ValueError("Outline content is empty after trimming to first chapter marker.")
+
     processed_chapter_sections = [] # Store as (chapter_num, section_text_for_details)
     
+    # 2. Now, find all chapter sections using iterative pattern matching with re.finditer on the cleaned content
     for idx, pattern in enumerate(chapter_marker_patterns):
-        print(f"Trying chapter marker pattern index {idx}: {pattern.pattern}")
+        print(f"Trying chapter marker pattern index {idx}: {pattern.pattern} on cleaned content.")
         matches = list(pattern.finditer(outline_content))
         
         if matches:
@@ -152,6 +158,7 @@ def ebook_parse_outline(outline_text, genre="Thriller"):
                 try:
                     chapter_num_str = current_match.group('num')
                     chapter_num = int(chapter_num_str)
+                    print(f"DEBUG: Matched header: '{current_match.group('header')}', Extracted Num: '{chapter_num}'")
                 except (IndexError, ValueError):
                     print(f"Warning: Could not extract chapter number from match using pattern {idx}. Match: '{current_match.group(0)}'")
                     continue
