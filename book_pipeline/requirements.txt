@@ -1,8 +1,0 @@
-google-generativeai
-reportlab
-Flask
-# Flask-SocketIO removed
-python-dotenv # Good practice for managing API keys via .env
-gunicorn # WSGI server for production/hosting
-requests # Added for podcast agent logic (potential future use)
-# Flask-CORS removed (will handle basic CORS if needed directly in Flask if required later)
